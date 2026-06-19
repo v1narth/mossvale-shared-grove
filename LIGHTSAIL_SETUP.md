@@ -5,6 +5,7 @@ Mossvale's authoritative PvP server can run on an AWS Lightsail container servic
 ## Requirements
 
 - AWS CLI v2
+- Lightsail Control plugin (`lightsailctl`)
 - Docker
 - A configured AWS profile with Lightsail permissions
 
@@ -12,6 +13,15 @@ Check local auth:
 
 ```sh
 aws sts get-caller-identity
+```
+
+Install `lightsailctl` locally on Apple Silicon:
+
+```sh
+mkdir -p .bin
+curl -L https://s3.us-west-2.amazonaws.com/lightsailctl/latest/darwin-arm64/lightsailctl -o .bin/lightsailctl
+chmod +x .bin/lightsailctl
+export PATH="$PWD/.bin:$PATH"
 ```
 
 ## Recommended Service
@@ -38,7 +48,7 @@ aws lightsail create-container-service \
 ## Build And Push The Image
 
 ```sh
-docker build -t mossvale-game-server:latest .
+docker build --platform linux/amd64 -t mossvale-game-server:latest .
 
 aws lightsail push-container-image \
   --service-name mossvale-game \
