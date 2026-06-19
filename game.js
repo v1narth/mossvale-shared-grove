@@ -122,8 +122,8 @@ const HELD_MOVE_LEAD = 280;
 const TOUCH_DRAG_THRESHOLD = 10;
 const MOVE_GUIDE_MAX = 115;
 const COMBAT_TARGET_HUD_MS = 4500;
-const PLAYER_BASE_SPEED = 172;
-const PLAYER_SPRINT_MULTIPLIER = 1.55;
+const PLAYER_BASE_SPEED = 140;
+const PLAYER_SPRINT_MULTIPLIER = 1.45;
 const PLAYER_SPRINT_DRAIN = 16;
 const PLAYER_ENERGY_REGEN = 8;
 const PLAYER_SPRINT_RESUME_ENERGY = 3;
@@ -4291,7 +4291,7 @@ function makeBots() {
       y: WORLD.h / 2 + randRangeSeed(rng, -520, 520),
       tx: null,
       ty: null,
-      speed: randRangeSeed(rng, 120, 165),
+      speed: randRangeSeed(rng, 96, 132),
       color: pick(colors, rng),
       skin: pick(skins, rng),
       hair: pick(hair, rng),

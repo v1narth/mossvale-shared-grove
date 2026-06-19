@@ -6,8 +6,8 @@ const HOST = process.env.HOST || "0.0.0.0";
 const WORLD = { w: 3600, h: 2600 };
 const TICK_HZ = 30;
 const SNAPSHOT_HZ = 20;
-const PLAYER_BASE_SPEED = 172;
-const PLAYER_SPRINT_MULTIPLIER = 1.55;
+const PLAYER_BASE_SPEED = 140;
+const PLAYER_SPRINT_MULTIPLIER = 1.45;
 const PLAYER_RADIUS = 17;
 const ATTACK_FUDGE = 26;
 
