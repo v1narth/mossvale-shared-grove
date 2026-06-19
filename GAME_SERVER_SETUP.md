@@ -35,4 +35,10 @@ Production requires a hosted `wss://` URL. Set it in `index.html`:
 
 Keep one Fly machine running until the game server has shared state across machines. The current server is intentionally in-memory so every connected player must land on the same process for fair PvP.
 
+Preferred AWS deployment:
+
+```txt
+See LIGHTSAIL_SETUP.md
+```
+
 When no game server URL is configured, the browser keeps using Supabase Realtime as the live fallback.
