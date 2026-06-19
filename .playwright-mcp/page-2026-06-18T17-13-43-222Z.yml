@@ -1,0 +1,76 @@
+- generic [active] [ref=e1]:
+  - generic "Mossvale shared world" [ref=e2]
+  - generic [ref=e3]:
+    - generic [ref=e6]:
+      - strong [ref=e7]: Mossvale
+      - generic [ref=e8]: shared grove
+    - generic [ref=e9]:
+      - generic [ref=e10]:
+        - generic [ref=e11]: "1"
+        - generic [ref=e12]: online
+      - generic [ref=e13]:
+        - generic [ref=e14]: "6"
+        - generic [ref=e15]: wood
+      - generic [ref=e16]:
+        - generic [ref=e17]: "0"
+        - generic [ref=e18]: stone
+      - generic [ref=e19]:
+        - generic [ref=e20]: "0"
+        - generic [ref=e21]: flowers
+  - generic [ref=e22]:
+    - button "Follow your character" [ref=e23] [cursor=pointer]: ⌂
+    - button "Plant a young tree" [ref=e24] [cursor=pointer]: ♧
+    - button "Build with wood" [ref=e25] [cursor=pointer]: B
+    - button "Wave to nearby players" [ref=e26] [cursor=pointer]: ◌
+    - button "Pause local ambience" [ref=e27] [cursor=pointer]: Ⅱ
+  - generic "Ability bar" [ref=e28]:
+    - button "Q, Quick Cut. Fast short slash in your aim direction." [ref=e29] [cursor=pointer]:
+      - generic [ref=e30]: Q
+      - generic [ref=e32]: Quick Cut
+    - button "W, Guard. Briefly blocks the next incoming hit." [ref=e33] [cursor=pointer]:
+      - generic [ref=e34]: W
+      - generic [ref=e36]: Guard
+    - button "E, Lunge. Dash forward and slash on arrival." [ref=e37] [cursor=pointer]:
+      - generic [ref=e38]: E
+      - generic [ref=e40]: Lunge
+    - button "R, Whirl. A soft spinning slash around you." [ref=e41] [cursor=pointer]:
+      - generic [ref=e42]: R
+      - generic [ref=e44]: Whirl
+  - generic "Quick bar" [ref=e45]:
+    - button "Select Sword, Level 1" [ref=e46]:
+      - generic [ref=e47]: "1"
+      - generic [ref=e48]: L1
+      - generic [ref=e50]: Sword
+    - button "Select Bow, Level 2" [ref=e51]:
+      - generic [ref=e52]: "2"
+      - generic [ref=e53]: L2
+      - generic [ref=e55]: Bow
+    - button "Select Pistol, Level 2" [ref=e56]:
+      - generic [ref=e57]: "3"
+      - generic [ref=e58]: L2
+      - generic [ref=e60]: Pistol
+    - button "Select Rifle, Level 4" [ref=e61]:
+      - generic [ref=e62]: "4"
+      - generic [ref=e63]: L4
+      - generic [ref=e65]: Rifle
+    - button "Select Laser, Level 5" [ref=e66]:
+      - generic [ref=e67]: "5"
+      - generic [ref=e68]: L5
+      - generic [ref=e70]: Laser
+    - button "Select Spear, Level 2" [ref=e71]:
+      - generic [ref=e72]: "6"
+      - generic [ref=e73]: L2
+      - generic [ref=e75]: Spear
+    - button "Select Wand, Level 3" [ref=e76]:
+      - generic [ref=e77]: "7"
+      - generic [ref=e78]: L3
+      - generic [ref=e80]: Wand
+    - button "Select Hammer, Level 4" [ref=e81]:
+      - generic [ref=e82]: "8"
+      - generic [ref=e83]: L4
+      - generic [ref=e85]: Hammer
+    - button "Select Blaster, Level 5" [ref=e86]:
+      - generic [ref=e87]: "9"
+      - generic [ref=e88]: L5
+      - generic [ref=e90]: Blaster
+  - text: + + + + +

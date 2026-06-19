@@ -1,0 +1,11 @@
+[    2953ms] ReferenceError: sanitizeEquipment is not defined
+    at http://localhost:5188/game.js:109:21
+[    4689ms] ReferenceError: sanitizeEquipment is not defined
+    at http://localhost:5188/game.js:109:21
+[    7778ms] ReferenceError: sanitizeEquipment is not defined
+    at http://localhost:5187/game.js:109:21
+[    8873ms] ReferenceError: sanitizeEquipment is not defined
+    at http://localhost:5187/game.js:109:21
+[   24974ms] ReferenceError: Cannot access 'itemDefs' before initialization
+    at sanitizeEquipment (http://localhost:5187/game.js:1163:18)
+    at http://localhost:5187/game.js:109:21
