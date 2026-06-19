@@ -129,8 +129,10 @@ const PLAYER_ENERGY_REGEN = 8;
 const PLAYER_SPRINT_RESUME_ENERGY = 3;
 const PLAYER_ENERGY_DEPLETED_REGEN_DELAY = 6000;
 
-const CAMERA_ZOOM = 1.5;
-const camera = { x: WORLD.w / 2, y: WORLD.h / 2, zoom: CAMERA_ZOOM };
+const DESKTOP_CAMERA_ZOOM = 1.5;
+const TABLET_CAMERA_ZOOM = 1.28;
+const PHONE_CAMERA_ZOOM = 1.12;
+const camera = { x: WORLD.w / 2, y: WORLD.h / 2, zoom: DESKTOP_CAMERA_ZOOM };
 const inventory = normalizeInventory(loadJson(INV_KEY, emptyInventory()));
 const resourceState = loadJson(RESOURCE_VERSION, {});
 const buildings = loadJson(BUILD_KEY, []);
@@ -2199,6 +2201,8 @@ function updateCamera(dt) {
     camera.x += (player.x - camera.x) * Math.min(1, dt * 5);
     camera.y += (player.y - camera.y) * Math.min(1, dt * 5);
   }
+  const nextZoom = targetCameraZoom();
+  camera.zoom += (nextZoom - camera.zoom) * Math.min(1, dt * 6);
   camera.x = clamp(camera.x, 0, WORLD.w);
   camera.y = clamp(camera.y, 0, WORLD.h);
 }
@@ -3701,8 +3705,11 @@ function onPointerDown(event) {
   }
   const world = screenToWorld(event.clientX, event.clientY);
   lastPointerWorld = world;
+  const touchThing = isTouch ? pickWorldThing(world.x, world.y) : null;
+  const touchStartedOnAttackTarget =
+    !buildMode && touchThing?.kind === "player" && isAttackableActor(touchThing.actor) && touchThing.actor.id !== player.id;
   canvas.setPointerCapture(event.pointerId);
-  if (event.button === 2 || isTouch) {
+  if (event.button === 2 || (isTouch && !buildMode && !touchStartedOnAttackTarget)) {
     rightMove = {
       id: event.pointerId,
       pointerType: event.pointerType,
@@ -3719,6 +3726,8 @@ function onPointerDown(event) {
     id: event.pointerId,
     button: event.button,
     pointerType: event.pointerType,
+    touchStartedOnAttackTarget,
+    touchAttackTargetId: touchStartedOnAttackTarget ? touchThing.actor.id : null,
     sx: event.clientX,
     sy: event.clientY,
     lx: event.clientX,
@@ -3727,6 +3736,7 @@ function onPointerDown(event) {
     moved: false,
     holdMove: false,
   };
+  if (touchStartedOnAttackTarget) startAttack(touchThing.actor);
 }
 
 function onPointerMove(event) {
@@ -3782,6 +3792,12 @@ function onPointerUp(event) {
     if (buildMode) {
       updateBuildPreview(world);
       placeCurrentBuild();
+      return;
+    }
+    if (activePointer?.touchAttackTargetId) {
+      const target = findAttackTarget(activePointer.touchAttackTargetId);
+      attackAt(target ? { x: target.x, y: target.y } : world);
+      announce("player");
       return;
     }
     if (wasHoldMove || activePointer?.moved) {
@@ -4703,6 +4719,12 @@ function worldToScreen(x, y) {
     x: (x - camera.x) * camera.zoom + width / 2,
     y: (y - camera.y) * camera.zoom + height / 2,
   };
+}
+
+function targetCameraZoom() {
+  if (width <= 560 && height > width) return PHONE_CAMERA_ZOOM;
+  if (width <= 860 && height > width) return TABLET_CAMERA_ZOOM;
+  return DESKTOP_CAMERA_ZOOM;
 }
 
 function sparkle(x, y, color, count) {
@@ -5644,6 +5666,7 @@ function resize() {
   dpr = Math.min(2, window.devicePixelRatio || 1);
   width = window.innerWidth;
   height = window.innerHeight;
+  camera.zoom = targetCameraZoom();
   canvas.width = Math.floor(width * dpr);
   canvas.height = Math.floor(height * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
