@@ -116,8 +116,10 @@ let moveGuideTarget = null;
 let dragPayload = null;
 let combatTargetId = null;
 let combatTargetVisibleUntil = 0;
+let suppressMouseUntil = 0;
 
 const HELD_MOVE_LEAD = 280;
+const TOUCH_DRAG_THRESHOLD = 10;
 const MOVE_GUIDE_MAX = 115;
 const COMBAT_TARGET_HUD_MS = 4500;
 const PLAYER_BASE_SPEED = 172;
@@ -803,7 +805,7 @@ function renderBuildPanel() {
   const piece = currentBuildPiece();
   const turn = buildRotation % 2 === 0 ? "horizontal" : "vertical";
   ui.buildHint.textContent = buildMode
-    ? `${piece.name}: ${piece.cost} wood. ${turn}. Left-click ground to place.`
+    ? `${piece.name}: ${piece.cost} wood. ${turn}. Click or tap ground to place.`
     : "Press B to build, R to rotate, Esc to cancel.";
 }
 
@@ -1159,7 +1161,7 @@ function setBuildMode(open) {
     player.action = null;
     selected = null;
     updateBuildPreview(lastPointerWorld || { x: player.x + 56, y: player.y });
-    ui.actionLine.textContent = `Build mode: ${currentBuildPiece().name}. Left-click to place.`;
+    ui.actionLine.textContent = `Build mode: ${currentBuildPiece().name}. Click or tap to place.`;
   } else {
     ui.actionLine.textContent = "Build mode closed.";
   }
@@ -3692,12 +3694,18 @@ function drawShadowText(text, x, y, color) {
 }
 
 function onPointerDown(event) {
+  const isTouch = event.pointerType === "touch";
+  if (isTouch) {
+    event.preventDefault();
+    suppressMouseUntil = performance.now() + 700;
+  }
   const world = screenToWorld(event.clientX, event.clientY);
   lastPointerWorld = world;
   canvas.setPointerCapture(event.pointerId);
-  if (event.button === 2) {
+  if (event.button === 2 || isTouch) {
     rightMove = {
       id: event.pointerId,
+      pointerType: event.pointerType,
       sx: event.clientX,
       sy: event.clientY,
       x: event.clientX,
@@ -3710,6 +3718,7 @@ function onPointerDown(event) {
   pointer = {
     id: event.pointerId,
     button: event.button,
+    pointerType: event.pointerType,
     sx: event.clientX,
     sy: event.clientY,
     lx: event.clientX,
@@ -3721,20 +3730,23 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
+  const isTouch = event.pointerType === "touch";
+  if (isTouch) event.preventDefault();
   const world = screenToWorld(event.clientX, event.clientY);
   lastPointerWorld = world;
   hover = pickWorldThing(world.x, world.y);
   if (buildMode) updateBuildPreview(world);
 
-  if (rightMove && typeof event.buttons === "number" && !(event.buttons & 2)) {
+  const isHeldTouchMove = rightMove?.id === event.pointerId && rightMove.pointerType === "touch";
+  if (rightMove?.id === event.pointerId && !isHeldTouchMove && typeof event.buttons === "number" && !(event.buttons & 2)) {
     stopHeldRightMove(event.pointerId);
   }
-  if (rightMove && (event.buttons & 2)) {
+  if (rightMove?.id === event.pointerId && (isHeldTouchMove || event.buttons & 2)) {
     rightMove.x = event.clientX;
     rightMove.y = event.clientY;
     const rdx = event.clientX - rightMove.sx;
     const rdy = event.clientY - rightMove.sy;
-    if (Math.hypot(rdx, rdy) > 5) {
+    if (Math.hypot(rdx, rdy) > (isHeldTouchMove ? TOUCH_DRAG_THRESHOLD : 5)) {
       rightMove.moved = true;
       rightMove.holdMove = true;
       setHeldMoveTarget();
@@ -3750,6 +3762,11 @@ function onPointerMove(event) {
 }
 
 function onPointerUp(event) {
+  const isTouch = event.pointerType === "touch";
+  if (isTouch) {
+    event.preventDefault();
+    suppressMouseUntil = performance.now() + 700;
+  }
   if (event.type === "pointercancel") {
     pointer = null;
     stopHeldRightMove();
@@ -3758,6 +3775,24 @@ function onPointerUp(event) {
 
   const world = screenToWorld(event.clientX, event.clientY);
   lastPointerWorld = world;
+  const activePointer = pointer?.id === event.pointerId ? pointer : null;
+  if (isTouch) {
+    const wasHoldMove = stopHeldRightMove(event.pointerId);
+    if (pointer?.id === event.pointerId) pointer = null;
+    if (buildMode) {
+      updateBuildPreview(world);
+      placeCurrentBuild();
+      return;
+    }
+    if (wasHoldMove || activePointer?.moved) {
+      announce("player");
+      return;
+    }
+    handleTouchWorldCommand(world);
+    announce("player");
+    return;
+  }
+
   if (event.button === 2) {
     const wasHoldMove = stopHeldRightMove(event.pointerId);
     if (pointer?.id === event.pointerId) pointer = null;
@@ -3786,12 +3821,26 @@ function onPointerUp(event) {
 }
 
 function onMouseDown(event) {
+  if (performance.now() < suppressMouseUntil) return;
   if (event.button !== 0 || buildMode) return;
   event.preventDefault();
   const world = screenToWorld(event.clientX, event.clientY);
   lastPointerWorld = world;
   attackAt(world);
   announce("player");
+}
+
+function handleTouchWorldCommand(world) {
+  const thing = pickWorldThing(world.x, world.y);
+  if (thing?.kind === "player" && isAttackableActor(thing.actor) && thing.actor.id !== player.id) {
+    attackAt(world);
+    return;
+  }
+  if (thing?.kind === "player" && thing.actor?.id === player.id) {
+    setPlayerMoveTarget(world);
+    return;
+  }
+  handleWorldCommand(world);
 }
 
 function updateHeldRightMove() {
@@ -3853,7 +3902,7 @@ function setPlayerMoveTarget(world, mode = "click") {
     playSfx("move", 0.65);
     ui.actionLine.textContent = "Moving. Hold Shift to sprint.";
     ui.focusName.textContent = "Grove Focus";
-    ui.focusDetail.textContent = "Right-click resources or loot. Left-click bots to attack.";
+    ui.focusDetail.textContent = "Right-click or tap resources and loot. Tap targets to attack.";
   }
 }
 
@@ -4061,13 +4110,13 @@ function setFocusForResource(res) {
   const time = isDepleted(res) ? `${Math.ceil((resourceState[res.id].depletedUntil - Date.now()) / 1000)}s` : "";
   const remaining = resourceRemainingNodes(res);
   const nodes = isDepleted(res) ? "" : ` ${remaining}/${resourceNodeCount(res)} nodes remain.`;
-  ui.focusDetail.textContent = `${state}${time ? `, returns in ${time}.` : "."}${nodes} Right-click to gather.`;
+  ui.focusDetail.textContent = `${state}${time ? `, returns in ${time}.` : "."}${nodes} Right-click or tap to gather.`;
 }
 
 function setFocusForLoot(loot) {
   ui.focusName.textContent = "Dropped loot";
   const from = loot.from ? ` from ${loot.from}` : "";
-  ui.focusDetail.textContent = `${inventorySummary(loot.items)}${from}. Right-click to pick up.`;
+  ui.focusDetail.textContent = `${inventorySummary(loot.items)}${from}. Right-click or tap to pick up.`;
 }
 
 function setFocusForPlayer(actor) {
@@ -4079,11 +4128,11 @@ function setFocusForPlayer(actor) {
   } else if (actor.isBot) {
     const rest = isBotDefeated(actor) ? "Resting" : `Health ${actor.hp}/${actor.maxHp}`;
     const aggro = actor.aggroUntil > now ? " Fighting back." : "";
-    ui.focusDetail.textContent = `${rest}.${aggro} Left-click to fight.`;
+    ui.focusDetail.textContent = `${rest}.${aggro} Left-click or tap to fight.`;
   } else {
     const hp = actor.maxHp ? ` Health ${actor.hp}/${actor.maxHp}.` : "";
     const weapon = weaponForActor(actor, false);
-    ui.focusDetail.textContent = `Another traveler in the shared grove.${hp} ${weapon.name} equipped. Left-click to fight.`;
+    ui.focusDetail.textContent = `Another traveler in the shared grove.${hp} ${weapon.name} equipped. Left-click or tap to fight.`;
   }
 }
 
