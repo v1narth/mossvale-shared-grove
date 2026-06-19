@@ -145,6 +145,7 @@ const online = {
   lastPlayerSaveFacing: null,
   playerStateReady: false,
   worldId: "main",
+  lastPlayerBroadcastAt: 0,
   lastBotBroadcastAt: 0,
   lastBotPersistAt: 0,
 };
@@ -160,6 +161,7 @@ const CLOSE_SOUND_RANGE = 90;
 const PICKUP_TOAST_MS = 3400;
 const PICKUP_TOAST_EXIT_MS = 360;
 const MAX_PICKUP_TOASTS = 6;
+const PLAYER_SYNC_INTERVAL_MS = 55;
 const BOT_SYNC_INTERVAL_MS = 100;
 const BOT_PERSIST_INTERVAL_MS = 5000;
 const NETWORK_INTERPOLATION_DELAY_MS = 140;
@@ -1835,7 +1837,7 @@ function update(dt) {
   updateCamera(dt);
   updateHud();
 
-  if (now % 120 < 18) announce("player");
+  maybeBroadcastPlayerState();
 }
 
 function updateResources() {
@@ -2782,6 +2784,7 @@ function hitPlayer(damage = 1) {
   playSfx("playerHit");
 
   if (player.hp <= 0) {
+    dropPlayerLoot();
     player.dazedUntil = now + 2600;
     player.attackTargetId = null;
     player.tx = null;
@@ -2810,11 +2813,76 @@ function dropBotLoot(bot) {
   announceSfx("loot", loot.x, loot.y, 0.52, 520);
 }
 
+function dropPlayerLoot() {
+  const lootItems = playerLootItems();
+  if (inventoryTotal(lootItems) <= 0) return;
+
+  const loot = {
+    id: `loot-${Date.now()}-${Math.floor(Math.random() * 9999)}`,
+    x: player.x + randRange(-12, 12),
+    y: player.y + randRange(-10, 10),
+    items: lootItems,
+    from: player.name,
+    bornAt: now,
+  };
+
+  droppedLoot.push(loot);
+  clearPlayerLootedItems();
+  sparkle(loot.x, loot.y, "#ffe27b", 30);
+  addFloat(loot.x, loot.y - 28, "dropped loot");
+  playSfx("loot", 0.82);
+  announceSfx("loot", loot.x, loot.y, 0.58, 560);
+  announce("loot-state", { droppedLoot: serializeDroppedLoot() });
+  scheduleRemoteWorldSave();
+}
+
+function playerLootItems() {
+  const items = {};
+  for (const [key, count] of Object.entries(inventory)) {
+    if (count > 0) items[key] = count;
+  }
+  for (const weapon of weapons) {
+    if (weapon.id === "stick" || weapon.starter) continue;
+    if (ownedWeapons[weapon.id]) items[weapon.id] = 1;
+  }
+  return items;
+}
+
+function clearPlayerLootedItems() {
+  for (const key of Object.keys(inventory)) inventory[key] = 0;
+  ownedWeapons = sanitizeOwnedWeapons({ stick: true });
+  equippedItems = { head: null, weapon: "stick", body: null, offhand: null, feet: null, charm: null };
+  inventoryLayout = sanitizeInventoryLayout([]);
+  quickSlots = sanitizeQuickSlots(["stick"]);
+  selectedSlot = 0;
+  player.maxHp = 5;
+  player.hp = 0;
+
+  saveJson(INV_KEY, inventory);
+  saveOwnedWeapons();
+  saveEquipment();
+  saveInventoryLayout();
+  saveQuickSlots();
+  renderQuickbar();
+  renderAbilityBar();
+  refreshInventoryPanel();
+  if (craftOpen) renderCraftPanel();
+}
+
 function collectLoot(loot) {
   for (const key of Object.keys(loot.items)) {
-    inventory[key] = (inventory[key] || 0) + loot.items[key];
+    if (isWeaponKey(key)) {
+      ownedWeapons[key] = true;
+      moveInventoryItem(key, firstOpenInventorySlot());
+      assignFirstEmptyQuickSlot(key);
+    } else {
+      inventory[key] = (inventory[key] || 0) + loot.items[key];
+    }
   }
   saveJson(INV_KEY, inventory);
+  saveOwnedWeapons();
+  saveInventoryLayout();
+  saveQuickSlots();
   refreshInventoryPanel();
   if (craftOpen) renderCraftPanel();
   const index = droppedLoot.findIndex((item) => item.id === loot.id);
@@ -2826,6 +2894,10 @@ function collectLoot(loot) {
   selected = null;
   announce("loot-state", { droppedLoot: serializeDroppedLoot() });
   scheduleRemoteWorldSave();
+}
+
+function isWeaponKey(key) {
+  return weapons.some((weapon) => weapon.id === key);
 }
 
 function respawnBot(bot) {
@@ -4613,6 +4685,13 @@ function announce(type, payload = {}) {
   sendOnlineMessage(message);
 }
 
+function maybeBroadcastPlayerState(force = false) {
+  const at = Date.now();
+  if (!force && at - online.lastPlayerBroadcastAt < PLAYER_SYNC_INTERVAL_MS) return;
+  online.lastPlayerBroadcastAt = at;
+  announce("player");
+}
+
 function saveResourceState() {
   saveJson(RESOURCE_VERSION, resourceState);
   scheduleRemoteWorldSave();
@@ -5057,10 +5136,11 @@ function serializeBots() {
 
 function receiveRemotePlayer(remote) {
   if (!remote?.id || remote.id === CLIENT_ID) return;
-  const sentAt = Number(remote.sentAt) || Date.now();
+  const receivedAt = Date.now();
+  const sentAt = receivedAt;
   const next = {
     ...remote,
-    lastSeen: Date.now(),
+    lastSeen: receivedAt,
     netX: Number(remote.x) || WORLD.w / 2,
     netY: Number(remote.y) || WORLD.h / 2,
     hp: clamp(remote.hp == null ? Number(remote.maxHp) || 5 : Number(remote.hp) || 0, 0, Number(remote.maxHp) || 5),
@@ -5226,6 +5306,7 @@ function applyBotState(nextBots = []) {
 function mergeBot(next) {
   const [clean] = sanitizeBots([next]);
   if (!clean) return;
+  clean.sentAt = Date.now();
   const existing = bots.find((bot) => bot.id === clean.id);
   if (existing) {
     mergeNetworkActor(existing, clean, { buffered: !isBotHost(), sentAt: clean.sentAt });
@@ -5433,7 +5514,8 @@ function lootDots(items) {
 
 function countLabel(key, count) {
   const item = itemDefs.find((def) => def.key === key);
-  const name = count === 1 ? item?.singular || item?.name || key : item?.plural || item?.name || key;
+  const weapon = weapons.find((def) => def.id === key);
+  const name = count === 1 ? item?.singular || weapon?.name || item?.name || key : item?.plural || weapon?.name || item?.name || key;
   return `${count} ${name}`;
 }
 
