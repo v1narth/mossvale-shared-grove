@@ -5,10 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mossvale Shared Grove</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="./styles.css?v=hud-target-2" />
+    <link rel="stylesheet" href="./styles.css?v=loading-spawn-1" />
   </head>
   <body>
     <canvas id="world" aria-label="Mossvale shared world"></canvas>
+
+    <div class="loading-screen" id="loadingScreen" role="status" aria-live="polite">
+      <div class="loading-mark" aria-hidden="true"></div>
+      <strong id="loadingTitle">Loading grove</strong>
+      <span id="loadingDetail">Finding your last place...</span>
+    </div>
 
     <div class="hud top-left">
       <div class="player-card">
@@ -328,6 +334,6 @@
         worldId: 'main',
       };
     </script>
-    <script src="./game.js?v=player-position-db-2"></script>
+    <script src="./game.js?v=loading-spawn-1"></script>
   </body>
 </html>

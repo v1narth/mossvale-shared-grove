@@ -68,6 +68,9 @@ const ui = {
   nameModal: document.getElementById("nameModal"),
   nameForm: document.getElementById("nameForm"),
   nameInput: document.getElementById("nameInput"),
+  loadingScreen: document.getElementById("loadingScreen"),
+  loadingTitle: document.getElementById("loadingTitle"),
+  loadingDetail: document.getElementById("loadingDetail"),
 };
 
 const WORLD = { w: 3600, h: 2600 };
@@ -4721,10 +4724,23 @@ function sendOnlineMessage(message) {
   });
 }
 
+function hideLoadingScreen() {
+  ui.loadingScreen?.classList.add("is-hidden");
+}
+
+function showLoadingError(detail) {
+  if (!ui.loadingScreen) return;
+  ui.loadingScreen.classList.add("is-error");
+  ui.loadingScreen.classList.remove("is-hidden");
+  if (ui.loadingTitle) ui.loadingTitle.textContent = "Could not load grove";
+  if (ui.loadingDetail) ui.loadingDetail.textContent = detail;
+}
+
 async function connectOnlineWorld() {
   const config = readSupabaseConfig();
   if (!config) {
     console.error("Mossvale Supabase config is missing or invalid; real database sync is required.");
+    showLoadingError("Real database sync is required.");
     return;
   }
 
@@ -4756,9 +4772,10 @@ async function connectOnlineWorld() {
         if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           console.warn("Mossvale realtime subscription failed", status, error);
         }
-      });
+    });
   } catch (error) {
     console.error("Mossvale could not connect to the real database.", error);
+    showLoadingError("Check your connection and refresh.");
   }
 }
 
@@ -4796,12 +4813,18 @@ async function loadRemotePlayerState() {
 
   if (error) {
     console.warn("Mossvale player position load failed", error);
+    showLoadingError("Your saved position could not be loaded.");
     return;
   }
 
   const [savedState] = data || [];
   if (!savedState) {
-    if (await persistRemotePlayerState()) online.playerStateReady = true;
+    if (await persistRemotePlayerState()) {
+      online.playerStateReady = true;
+      hideLoadingScreen();
+    } else {
+      showLoadingError("Your starting position could not be saved.");
+    }
     return;
   }
 
@@ -4820,6 +4843,7 @@ function applyRemotePlayerState(state) {
   online.lastPlayerSaveY = player.y;
   online.lastPlayerSaveFacing = player.facing;
   online.playerStateReady = true;
+  hideLoadingScreen();
 }
 
 function scheduleRemotePlayerSave(force = false) {

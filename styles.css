@@ -32,6 +32,64 @@ canvas {
   background: #7aa56e;
 }
 
+.loading-screen {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px;
+  color: #f8ffec;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(184, 226, 142, 0.2), transparent 260px),
+    rgba(16, 32, 25, 0.96);
+  text-align: center;
+  transition:
+    opacity 180ms ease,
+    visibility 180ms ease;
+}
+
+.loading-screen.is-hidden {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-screen.is-error {
+  background:
+    radial-gradient(circle at 50% 42%, rgba(225, 151, 96, 0.18), transparent 260px),
+    rgba(24, 30, 26, 0.97);
+}
+
+.loading-mark {
+  width: 46px;
+  height: 46px;
+  border: 4px solid rgba(248, 255, 236, 0.22);
+  border-top-color: #d9ffb8;
+  border-radius: 50%;
+  animation: loading-spin 820ms linear infinite;
+}
+
+.loading-screen strong {
+  font-size: 17px;
+  font-weight: 850;
+}
+
+.loading-screen span {
+  max-width: min(300px, calc(100vw - 48px));
+  color: rgba(248, 255, 236, 0.72);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+@keyframes loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .hud {
   position: fixed;
   z-index: 5;
