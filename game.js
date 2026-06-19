@@ -88,6 +88,7 @@ const PLAYER_ID = loadStablePlayerId();
 const CLIENT_ID = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 const channel = "BroadcastChannel" in window ? new BroadcastChannel("mossvale-grove") : null;
 const SUPABASE_IMPORT_URL = "https://esm.sh/@supabase/supabase-js@2";
+const GAME_SERVER_URL = readGameServerUrl();
 
 let width = 1;
 let height = 1;
@@ -148,6 +149,13 @@ const online = {
   lastPlayerBroadcastAt: 0,
   lastBotBroadcastAt: 0,
   lastBotPersistAt: 0,
+};
+const gameServer = {
+  socket: null,
+  connected: false,
+  reconnectTimer: null,
+  lastStateSentAt: 0,
+  serverPlayerIds: new Set(),
 };
 const particles = [];
 const floatText = [];
@@ -624,12 +632,14 @@ buildCraftPanel();
 renderInventoryPanel();
 announce("hello");
 connectOnlineWorld();
+connectGameServer();
 window.MOSSVALE_DEBUG = {
   bots: () => serializeBots(),
   droppedLoot: () => serializeDroppedLoot(),
   botHost: () => currentBotHostId(),
   isBotHost: () => isBotHost(),
   online: () => online.connected,
+  gameServer: () => gameServer.connected,
   playerState: () => ({
     id: player.persistentId,
     x: player.x,
@@ -2119,7 +2129,7 @@ function updateProjectiles(dt) {
       for (const target of playerTargets) {
         if (!isAttackableActor(target)) continue;
         if (dist(shot.x, shot.y, target.x, target.y) < 17) {
-          hitRemotePlayer(target, shot, Math.atan2(shot.vy, shot.vx));
+          if (!gameServer.connected) hitRemotePlayer(target, shot, Math.atan2(shot.vy, shot.vx));
           projectiles.splice(i, 1);
           break;
         }
@@ -2269,6 +2279,11 @@ function clearCombatTarget() {
 
 function hitRemotePlayer(target, weapon, facing = player.facing) {
   if (!target || target.id === player.id) return;
+  if (sendGameServerAttack(target, weapon, facing)) {
+    focusCombatTarget(target);
+    ui.actionLine.textContent = `${weapon.name || "Attack"} sent to server.`;
+    return;
+  }
   focusCombatTarget(target);
   addFloat(target.x, target.y - 38, `-${weapon.damage}`);
   sparkle(target.x, target.y - 10, "#f0b66d", 14);
@@ -2345,6 +2360,7 @@ function useWeaponOnActor(target, weapon) {
     targetX: target.x,
     targetY: target.y,
   });
+  if (!target.isBot && weapon.type !== "melee") sendGameServerAttack(target, weapon, player.facing);
 
   if (weapon.type === "melee") {
     if (target.isBot) hitBot(target, weapon.damage, weapon.name);
@@ -2397,6 +2413,7 @@ function attackAtPoint(world, weapon) {
     targetX: world.x,
     targetY: world.y,
   });
+  sendGameServerAttack(null, weapon, player.facing, world);
 
   if (weapon.type === "melee") {
     const bot = findMeleeHit(weapon, player.facing);
@@ -3797,6 +3814,7 @@ function stopHeldRightMove(pointerId = null) {
   player.vx = 0;
   player.vy = 0;
   moveGuideTarget = null;
+  sendGameServerMove();
   return true;
 }
 
@@ -3828,6 +3846,7 @@ function setPlayerMoveTarget(world, mode = "click") {
   if (mode !== "hold") moveGuideTarget = null;
   player.tx = clamp(world.x, 28, WORLD.w - 28);
   player.ty = clamp(world.y, 28, WORLD.h - 28);
+  sendGameServerMove();
   followSelf = true;
   lastHoldMoveAt = now;
   if (mode !== "hold") {
@@ -3873,6 +3892,7 @@ function walkToResource(res) {
   moveGuideTarget = null;
   player.tx = p.x;
   player.ty = p.y;
+  sendGameServerMove();
   player.action = null;
   playSfx("move", 0.58);
   ui.actionLine.textContent = `Moving to ${resourceLabel(res).toLowerCase()}.`;
@@ -3882,6 +3902,7 @@ function walkToResource(res) {
     if (dist(player.x, player.y, res.x, res.y) <= resourceInteractionRadius(res)) {
       player.tx = null;
       player.ty = null;
+      sendGameServerMove();
       player.action = createGatherAction(res);
       ui.actionLine.textContent = `${actionVerb(res)} ${resourceLabel(res).toLowerCase()}...`;
       return;
@@ -3890,6 +3911,7 @@ function walkToResource(res) {
       const next = chooseResourceApproach(res, player.x, player.y);
       player.tx = next.x;
       player.ty = next.y;
+      sendGameServerMove();
     }
     requestAnimationFrame(check);
   };
@@ -3905,6 +3927,7 @@ function walkToLoot(loot) {
   moveGuideTarget = null;
   player.tx = loot.x;
   player.ty = loot.y;
+  sendGameServerMove();
   playSfx("move", 0.58);
   ui.actionLine.textContent = `Moving to ${inventorySummary(loot.items)}.`;
 
@@ -3913,6 +3936,7 @@ function walkToLoot(loot) {
     if (dist(player.x, player.y, loot.x, loot.y) <= 28) {
       player.tx = null;
       player.ty = null;
+      sendGameServerMove();
       collectLoot(loot);
       return;
     }
@@ -4689,6 +4713,10 @@ function maybeBroadcastPlayerState(force = false) {
   const at = Date.now();
   if (!force && at - online.lastPlayerBroadcastAt < PLAYER_SYNC_INTERVAL_MS) return;
   online.lastPlayerBroadcastAt = at;
+  if (gameServer.connected) {
+    sendGameServerState();
+    return;
+  }
   announce("player");
 }
 
@@ -4797,6 +4825,7 @@ function handlePeerMessage(message) {
 }
 
 function sendOnlineMessage(message) {
+  if (gameServer.connected && (message.type === "player" || message.type === "pvp-attack" || message.type === "pvp-hit")) return;
   if (!online.connected || !online.channel) return;
   online.channel.send({ type: "broadcast", event: "game", payload: { message } }).catch((error) => {
     console.warn("Mossvale realtime send failed", error);
@@ -4813,6 +4842,159 @@ function showLoadingError(detail) {
   ui.loadingScreen.classList.remove("is-hidden");
   if (ui.loadingTitle) ui.loadingTitle.textContent = "Could not load grove";
   if (ui.loadingDetail) ui.loadingDetail.textContent = detail;
+}
+
+function connectGameServer() {
+  if (!GAME_SERVER_URL || !("WebSocket" in window)) return;
+  clearTimeout(gameServer.reconnectTimer);
+
+  const socket = new WebSocket(GAME_SERVER_URL);
+  gameServer.socket = socket;
+
+  socket.addEventListener("open", () => {
+    gameServer.connected = true;
+    sendGameServerMessage("join", playerNetworkState());
+    sendGameServerMove();
+    ui.actionLine.textContent = "Authoritative PvP server connected.";
+  });
+
+  socket.addEventListener("message", (event) => {
+    try {
+      handleGameServerMessage(JSON.parse(event.data));
+    } catch (error) {
+      console.warn("Mossvale game server message failed", error);
+    }
+  });
+
+  socket.addEventListener("close", () => {
+    gameServer.connected = false;
+    gameServer.serverPlayerIds.clear();
+    gameServer.reconnectTimer = setTimeout(connectGameServer, 1800);
+  });
+
+  socket.addEventListener("error", () => {
+    gameServer.connected = false;
+  });
+}
+
+function handleGameServerMessage(message) {
+  if (!message?.type) return;
+
+  if (message.type === "welcome") {
+    return;
+  }
+
+  if (message.type === "snapshot") {
+    applyGameServerSnapshot(message.players || []);
+    return;
+  }
+
+  if (message.type === "leave") {
+    others.delete(message.id);
+    gameServer.serverPlayerIds.delete(message.id);
+    return;
+  }
+
+  if (message.type === "pvp-attack") {
+    showRemoteAttack(message);
+    return;
+  }
+
+  if (message.type === "pvp-hit") {
+    applyPvpHit(message);
+  }
+}
+
+function applyGameServerSnapshot(players = []) {
+  const seen = new Set();
+  for (const remote of players) {
+    if (!remote?.id) continue;
+    seen.add(remote.id);
+    if (remote.id === player.id) {
+      reconcileAuthoritativePlayer(remote);
+    } else {
+      gameServer.serverPlayerIds.add(remote.id);
+      receiveRemotePlayer({ ...remote, sentAt: Date.now() });
+    }
+  }
+
+  for (const id of gameServer.serverPlayerIds) {
+    if (!seen.has(id)) {
+      others.delete(id);
+      gameServer.serverPlayerIds.delete(id);
+    }
+  }
+}
+
+function reconcileAuthoritativePlayer(remote) {
+  const serverX = Number(remote.x) || player.x;
+  const serverY = Number(remote.y) || player.y;
+  const d = dist(player.x, player.y, serverX, serverY);
+  if (d > 96) {
+    player.x = serverX;
+    player.y = serverY;
+  } else if (d > 8) {
+    player.x += (serverX - player.x) * 0.12;
+    player.y += (serverY - player.y) * 0.12;
+  }
+  player.hp = clamp(Number(remote.hp) || player.hp, 0, player.maxHp);
+  player.maxHp = clamp(Number(remote.maxHp) || player.maxHp, 1, 40);
+}
+
+function sendGameServerMessage(type, payload = {}) {
+  if (!gameServer.connected || gameServer.socket?.readyState !== WebSocket.OPEN) return false;
+  gameServer.socket.send(JSON.stringify({ type, ...payload }));
+  return true;
+}
+
+function sendGameServerMove() {
+  if (!gameServer.connected) return false;
+  return sendGameServerMessage("move", {
+    x: player.tx ?? player.x,
+    y: player.ty ?? player.y,
+    sprinting: player.sprintHeld,
+  });
+}
+
+function sendGameServerState(force = false) {
+  const at = Date.now();
+  if (!force && at - gameServer.lastStateSentAt < 220) return;
+  gameServer.lastStateSentAt = at;
+  sendGameServerMessage("state", playerNetworkState());
+}
+
+function sendGameServerAttack(target, weapon, facing = player.facing, point = null) {
+  if (!gameServer.connected) return false;
+  const aim = point || target || {
+    x: player.x + Math.cos(facing) * weapon.range,
+    y: player.y + Math.sin(facing) * weapon.range,
+  };
+  return sendGameServerMessage("attack", {
+    weaponId: weapon.id,
+    targetId: target?.id || null,
+    targetX: aim.x,
+    targetY: aim.y,
+    facing,
+  });
+}
+
+function playerNetworkState() {
+  return {
+    id: player.id,
+    name: player.name,
+    x: player.x,
+    y: player.y,
+    tx: player.tx,
+    ty: player.ty,
+    color: player.color,
+    skin: player.skin,
+    hair: player.hair,
+    pants: player.pants,
+    facing: player.facing,
+    hp: player.hp,
+    maxHp: player.maxHp,
+    weaponId: currentWeapon().id,
+  };
 }
 
 async function connectOnlineWorld() {
@@ -4869,6 +5051,21 @@ function readSupabaseConfig() {
   if (!config.url || !config.publishableKey) return null;
   if (!isRealSupabaseUrl(config.url)) return null;
   return config;
+}
+
+function readGameServerUrl() {
+  const fromWindow = window.MOSSVALE_GAME_SERVER || {};
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("gameServer") || fromWindow.url || "";
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "ws:" && url.protocol !== "wss:") return "";
+    if (window.location.protocol === "https:" && url.protocol !== "wss:") return "";
+    return url.href;
+  } catch {
+    return "";
+  }
 }
 
 function isRealSupabaseUrl(url) {

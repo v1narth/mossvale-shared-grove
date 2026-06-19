@@ -1,0 +1,7 @@
+{
+  "type": "module",
+  "scripts": {
+    "dev": "node dev-server.mjs",
+    "game-server": "node server/game-server.mjs"
+  }
+}
