@@ -625,6 +625,12 @@ window.MOSSVALE_DEBUG = {
   botHost: () => currentBotHostId(),
   isBotHost: () => isBotHost(),
   online: () => online.connected,
+  playerState: () => ({
+    id: player.persistentId,
+    x: player.x,
+    y: player.y,
+    ready: online.playerStateReady,
+  }),
 };
 requestAnimationFrame(tick);
 
@@ -4786,19 +4792,20 @@ async function loadRemotePlayerState() {
     .select("x, y, facing")
     .eq("world_id", online.worldId)
     .eq("player_id", PLAYER_ID)
-    .maybeSingle();
+    .limit(1);
 
   if (error) {
     console.warn("Mossvale player position load failed", error);
     return;
   }
 
-  if (!data) {
+  const [savedState] = data || [];
+  if (!savedState) {
     if (await persistRemotePlayerState()) online.playerStateReady = true;
     return;
   }
 
-  applyRemotePlayerState(data);
+  applyRemotePlayerState(savedState);
 }
 
 function applyRemotePlayerState(state) {
