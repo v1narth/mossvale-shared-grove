@@ -1,0 +1,10 @@
+.git
+.gitignore
+.playwright-mcp
+.vite
+dist
+node_modules
+public
+src
+supabase/.temp
+.DS_Store
