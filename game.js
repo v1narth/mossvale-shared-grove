@@ -73,6 +73,7 @@ const ui = {
 const WORLD = { w: 3600, h: 2600 };
 const RESOURCE_VERSION = "mossvale_resources_v2";
 const NAME_KEY = "mossvale_player_name";
+const PLAYER_ID_KEY = "mossvale_player_id";
 const INV_KEY = "mossvale_inventory_v1";
 const INV_LAYOUT_KEY = "mossvale_inventory_layout_v1";
 const QUICKBAR_KEY = "mossvale_quickbar_v1";
@@ -80,6 +81,7 @@ const BUILD_KEY = "mossvale_buildings_v1";
 const PLANTED_KEY = "mossvale_planted_resources_v1";
 const WEAPON_KEY = "mossvale_weapon_unlocks_v1";
 const EQUIPMENT_KEY = "mossvale_equipment_v1";
+const PLAYER_ID = loadStablePlayerId();
 const CLIENT_ID = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 const channel = "BroadcastChannel" in window ? new BroadcastChannel("mossvale-grove") : null;
 const SUPABASE_IMPORT_URL = "https://esm.sh/@supabase/supabase-js@2";
@@ -134,6 +136,11 @@ const online = {
   connected: false,
   applyingRemote: false,
   saveTimer: null,
+  playerSaveTimer: null,
+  lastPlayerSaveX: null,
+  lastPlayerSaveY: null,
+  lastPlayerSaveFacing: null,
+  playerStateReady: false,
   worldId: "main",
   lastBotBroadcastAt: 0,
   lastBotPersistAt: 0,
@@ -559,9 +566,9 @@ const palette = {
 
 const player = {
   id: CLIENT_ID,
+  persistentId: PLAYER_ID,
   name: localStorage.getItem(NAME_KEY) || randomName(),
-  x: WORLD.w / 2 + randRange(-90, 90),
-  y: WORLD.h / 2 + randRange(-70, 70),
+  ...randomSpawnPosition(),
   tx: null,
   ty: null,
   vx: 0,
@@ -622,7 +629,10 @@ window.MOSSVALE_DEBUG = {
 requestAnimationFrame(tick);
 
 window.addEventListener("resize", resize);
-window.addEventListener("beforeunload", () => announce("leave"));
+window.addEventListener("beforeunload", () => {
+  announce("leave");
+  if (online.playerStateReady) persistRemotePlayerState();
+});
 window.addEventListener("pointerdown", ensureAudio, { capture: true });
 window.addEventListener("keydown", onKeyDown);
 window.addEventListener("keydown", ensureAudio, { capture: true });
@@ -697,6 +707,7 @@ ui.nameForm.addEventListener("submit", (event) => {
   ui.nameModal.setAttribute("aria-hidden", "true");
   playSfx("complete", 0.72);
   announce("player");
+  scheduleRemotePlayerSave(true);
 });
 
 if (channel) {
@@ -1801,6 +1812,7 @@ function update(dt) {
   updateResources();
   updatePlayerCombat(dt);
   updateActor(player, dt, true);
+  scheduleRemotePlayerSave();
   updatePlayerEnergy(dt);
   if (isBotHost()) {
     updateBots(dt);
@@ -4705,7 +4717,10 @@ function sendOnlineMessage(message) {
 
 async function connectOnlineWorld() {
   const config = readSupabaseConfig();
-  if (!config) return;
+  if (!config) {
+    console.error("Mossvale Supabase config is missing or invalid; real database sync is required.");
+    return;
+  }
 
   online.worldId = config.worldId || "main";
 
@@ -4719,6 +4734,7 @@ async function connectOnlineWorld() {
       },
     });
 
+    await loadRemotePlayerState();
     await loadRemoteWorldState();
 
     online.channel = online.client
@@ -4736,27 +4752,110 @@ async function connectOnlineWorld() {
         }
       });
   } catch (error) {
-    console.warn("Mossvale is running in local mode; Supabase could not connect.", error);
+    console.error("Mossvale could not connect to the real database.", error);
   }
 }
 
 function readSupabaseConfig() {
   const fromWindow = window.MOSSVALE_SUPABASE || {};
-  const fromStorage = loadJson("mossvale_supabase_config", {});
-  const params = new URLSearchParams(window.location.search);
   const config = {
-    url: params.get("supabaseUrl") || fromStorage.url || fromWindow.url,
-    publishableKey:
-      params.get("supabaseKey") ||
-      fromStorage.publishableKey ||
-      fromStorage.anonKey ||
-      fromWindow.publishableKey ||
-      fromWindow.anonKey,
-    worldId: params.get("world") || fromStorage.worldId || fromWindow.worldId || "main",
+    url: fromWindow.url,
+    publishableKey: fromWindow.publishableKey || fromWindow.anonKey,
+    worldId: fromWindow.worldId || "main",
   };
 
   if (!config.url || !config.publishableKey) return null;
+  if (!isRealSupabaseUrl(config.url)) return null;
   return config;
+}
+
+function isRealSupabaseUrl(url) {
+  try {
+    const { protocol, hostname } = new URL(url);
+    return protocol === "https:" && hostname.endsWith(".supabase.co");
+  } catch {
+    return false;
+  }
+}
+
+async function loadRemotePlayerState() {
+  if (!online.client) return;
+
+  const { data, error } = await online.client
+    .from("mossvale_players")
+    .select("x, y, facing")
+    .eq("world_id", online.worldId)
+    .eq("player_id", PLAYER_ID)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Mossvale player position load failed", error);
+    return;
+  }
+
+  if (!data) {
+    if (await persistRemotePlayerState()) online.playerStateReady = true;
+    return;
+  }
+
+  applyRemotePlayerState(data);
+}
+
+function applyRemotePlayerState(state) {
+  player.x = clamp(Number(state.x) || player.x, 42, WORLD.w - 42);
+  player.y = clamp(Number(state.y) || player.y, 42, WORLD.h - 42);
+  player.tx = null;
+  player.ty = null;
+  player.facing = Number(state.facing) || player.facing;
+  camera.x = player.x;
+  camera.y = player.y;
+  online.lastPlayerSaveX = player.x;
+  online.lastPlayerSaveY = player.y;
+  online.lastPlayerSaveFacing = player.facing;
+  online.playerStateReady = true;
+}
+
+function scheduleRemotePlayerSave(force = false) {
+  if (!online.client || !online.playerStateReady) return;
+
+  const lastX = online.lastPlayerSaveX;
+  const lastY = online.lastPlayerSaveY;
+  const lastFacing = online.lastPlayerSaveFacing;
+  const moved = lastX == null || lastY == null || dist(player.x, player.y, lastX, lastY) >= 10;
+  const turned = lastFacing == null || Math.abs(angleDelta(player.facing, lastFacing)) >= 0.15;
+  if (!force && !moved && !turned) return;
+  if (online.playerSaveTimer) return;
+
+  online.playerSaveTimer = setTimeout(persistRemotePlayerState, force ? 0 : 800);
+}
+
+async function persistRemotePlayerState() {
+  if (!online.client) return false;
+  clearTimeout(online.playerSaveTimer);
+  online.playerSaveTimer = null;
+
+  const { error } = await online.client.from("mossvale_players").upsert(
+    {
+      world_id: online.worldId,
+      player_id: PLAYER_ID,
+      name: player.name,
+      x: player.x,
+      y: player.y,
+      facing: player.facing,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "world_id,player_id" }
+  );
+
+  if (error) {
+    console.warn("Mossvale player position save failed", error);
+    return false;
+  }
+
+  online.lastPlayerSaveX = player.x;
+  online.lastPlayerSaveY = player.y;
+  online.lastPlayerSaveFacing = player.facing;
+  return true;
 }
 
 async function loadRemoteWorldState() {
@@ -5352,6 +5451,27 @@ function loadJson(key, fallback) {
 
 function saveJson(key, value) {
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+function loadStablePlayerId() {
+  const existing = localStorage.getItem(PLAYER_ID_KEY);
+  if (isSafePlayerId(existing)) return existing;
+
+  const raw = crypto.randomUUID?.() || `${Date.now()}-${Math.floor(Math.random() * 999999)}`;
+  const next = `player-${raw}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 80);
+  localStorage.setItem(PLAYER_ID_KEY, next);
+  return next;
+}
+
+function isSafePlayerId(value) {
+  return typeof value === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value);
+}
+
+function randomSpawnPosition() {
+  return {
+    x: WORLD.w / 2 + randRange(-90, 90),
+    y: WORLD.h / 2 + randRange(-70, 70),
+  };
 }
 
 function randomName() {
