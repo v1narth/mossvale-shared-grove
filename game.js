@@ -7,9 +7,18 @@ const ui = {
   stone: document.getElementById("stoneCount"),
   flower: document.getElementById("flowerCount"),
   cotton: document.getElementById("cottonCount"),
+  playerAvatar: document.getElementById("playerAvatar"),
   playerName: document.getElementById("playerName"),
+  healthProgress: document.getElementById("healthProgress"),
+  healthCount: document.getElementById("healthCount"),
   energyProgress: document.getElementById("energyProgress"),
   energyCount: document.getElementById("energyCount"),
+  targetHud: document.getElementById("targetHud"),
+  targetAvatar: document.getElementById("targetAvatar"),
+  targetName: document.getElementById("targetName"),
+  targetDetail: document.getElementById("targetDetail"),
+  targetHealthProgress: document.getElementById("targetHealthProgress"),
+  targetHealthCount: document.getElementById("targetHealthCount"),
   actionLine: document.getElementById("actionLine"),
   actionProgress: document.getElementById("actionProgress"),
   gatherHud: document.getElementById("gatherHud"),
@@ -68,10 +77,12 @@ const INV_KEY = "mossvale_inventory_v1";
 const INV_LAYOUT_KEY = "mossvale_inventory_layout_v1";
 const QUICKBAR_KEY = "mossvale_quickbar_v1";
 const BUILD_KEY = "mossvale_buildings_v1";
+const PLANTED_KEY = "mossvale_planted_resources_v1";
 const WEAPON_KEY = "mossvale_weapon_unlocks_v1";
 const EQUIPMENT_KEY = "mossvale_equipment_v1";
 const CLIENT_ID = crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`;
 const channel = "BroadcastChannel" in window ? new BroadcastChannel("mossvale-grove") : null;
+const SUPABASE_IMPORT_URL = "https://esm.sh/@supabase/supabase-js@2";
 
 let width = 1;
 let height = 1;
@@ -97,9 +108,12 @@ let lastPointerWorld = null;
 let lastHoldMoveAt = 0;
 let moveGuideTarget = null;
 let dragPayload = null;
+let combatTargetId = null;
+let combatTargetVisibleUntil = 0;
 
 const HELD_MOVE_LEAD = 280;
 const MOVE_GUIDE_MAX = 115;
+const COMBAT_TARGET_HUD_MS = 4500;
 const PLAYER_BASE_SPEED = 172;
 const PLAYER_SPRINT_MULTIPLIER = 1.55;
 const PLAYER_SPRINT_DRAIN = 16;
@@ -114,6 +128,16 @@ const resourceState = loadJson(RESOURCE_VERSION, {});
 const buildings = loadJson(BUILD_KEY, []);
 let equippedItems = loadJson(EQUIPMENT_KEY, {});
 const others = new Map();
+const online = {
+  client: null,
+  channel: null,
+  connected: false,
+  applyingRemote: false,
+  saveTimer: null,
+  worldId: "main",
+  lastBotBroadcastAt: 0,
+  lastBotPersistAt: 0,
+};
 const particles = [];
 const floatText = [];
 const projectiles = [];
@@ -126,6 +150,12 @@ const CLOSE_SOUND_RANGE = 90;
 const PICKUP_TOAST_MS = 3400;
 const PICKUP_TOAST_EXIT_MS = 360;
 const MAX_PICKUP_TOASTS = 6;
+const BOT_SYNC_INTERVAL_MS = 100;
+const BOT_PERSIST_INTERVAL_MS = 5000;
+const NETWORK_INTERPOLATION_DELAY_MS = 140;
+const NETWORK_MAX_EXTRAPOLATION_MS = 120;
+const NETWORK_SMOOTHING_SPEED = 18;
+const NETWORK_SNAP_DISTANCE = 520;
 
 function ensureAudio() {
   if (!audioSupport) return null;
@@ -560,6 +590,7 @@ const player = {
 };
 
 ui.playerName.textContent = player.name;
+applyAvatarStyle(ui.playerAvatar, player);
 if (!localStorage.getItem(NAME_KEY)) openNameModal();
 buildQuickbar();
 renderAbilityBar();
@@ -572,6 +603,7 @@ const lakes = [
 ];
 
 const resources = makeResources();
+applyPlantedResources(loadJson(PLANTED_KEY, []), { save: false });
 makeBots();
 resize();
 syncPlayerStats();
@@ -579,6 +611,14 @@ buildBuildPanel();
 buildCraftPanel();
 renderInventoryPanel();
 announce("hello");
+connectOnlineWorld();
+window.MOSSVALE_DEBUG = {
+  bots: () => serializeBots(),
+  droppedLoot: () => serializeDroppedLoot(),
+  botHost: () => currentBotHostId(),
+  isBotHost: () => isBotHost(),
+  online: () => online.connected,
+};
 requestAnimationFrame(tick);
 
 window.addEventListener("resize", resize);
@@ -661,51 +701,7 @@ ui.nameForm.addEventListener("submit", (event) => {
 
 if (channel) {
   channel.addEventListener("message", (event) => {
-    const message = event.data;
-    if (!message || message.id === CLIENT_ID) return;
-
-    if (message.type === "hello") {
-      announce("player");
-      announce("resource-state", { state: resourceState });
-      return;
-    }
-
-    if (message.type === "leave") {
-      others.delete(message.id);
-      return;
-    }
-
-    if (message.type === "player") {
-      others.set(message.id, { ...message.player, lastSeen: Date.now() });
-      return;
-    }
-
-    if (message.type === "sfx" && message.sfx) {
-      playWorldSfx(message.sfx.name, message.sfx.x, message.sfx.y, message.sfx.intensity, message.sfx.range);
-      return;
-    }
-
-    if (message.type === "resource-state") {
-      Object.assign(resourceState, message.state || {});
-      saveResourceState();
-      return;
-    }
-
-    if (message.type === "resource-update") {
-      resourceState[message.resourceId] = message.state;
-      saveResourceState();
-      const res = resources.find((item) => item.id === message.resourceId);
-      if (res) {
-        sparkle(res.x, res.y, message.state?.depletedUntil ? "#f2d37a" : "#b9ef91", 12);
-        if (message.state?.depletedUntil) playWorldSfx("complete", res.x, res.y, 0.58, 840);
-      }
-      return;
-    }
-
-    if (message.type === "wave") {
-      addFloat(message.x, message.y - 35, `${message.name || "Traveler"} waves`);
-      playWorldSfx("wave", message.x, message.y, 0.84, 860);
-    }
+    handlePeerMessage(event.data);
   });
 }
 
@@ -1127,6 +1123,7 @@ function setBuildMode(open) {
   buildPreview = null;
   if (buildMode) {
     player.attackTargetId = null;
+    clearCombatTarget();
     player.action = null;
     selected = null;
     updateBuildPreview(lastPointerWorld || { x: player.x + 56, y: player.y });
@@ -1805,10 +1802,15 @@ function update(dt) {
   updatePlayerCombat(dt);
   updateActor(player, dt, true);
   updatePlayerEnergy(dt);
-  updateBots(dt);
+  if (isBotHost()) {
+    updateBots(dt);
+    maybeBroadcastBotState();
+  } else {
+    updateNetworkBots(dt);
+  }
   updateProjectiles(dt);
   updateParticles(dt);
-  updateRemotePlayers();
+  updateRemotePlayers(dt);
   updateCamera(dt);
   updateHud();
 
@@ -1845,8 +1847,8 @@ function updatePlayerCombat(dt) {
     ui.actionLine.textContent = "Back on your feet.";
   }
 
-  const target = bots.find((bot) => bot.id === player.attackTargetId);
-  if (!target || isBotDefeated(target)) {
+  const target = findAttackTarget(player.attackTargetId);
+  if (!target) {
     player.attackTargetId = null;
     return;
   }
@@ -1862,7 +1864,7 @@ function updatePlayerCombat(dt) {
   player.tx = null;
   player.ty = null;
   if (player.attackCooldown <= 0) {
-    useWeaponOnBot(target, weapon);
+    useWeaponOnActor(target, weapon);
   }
 }
 
@@ -2078,10 +2080,23 @@ function updateProjectiles(dt) {
       }
       if (shot.damage <= 0) continue;
       const targets = shot.targetId ? bots.filter((bot) => bot.id === shot.targetId) : bots;
+      let hit = false;
       for (const target of targets) {
         if (isBotDefeated(target)) continue;
         if (dist(shot.x, shot.y, target.x, target.y) < 17) {
           hitBot(target, shot.damage, shot.weaponName);
+          projectiles.splice(i, 1);
+          hit = true;
+          break;
+        }
+      }
+      if (hit) continue;
+
+      const playerTargets = shot.targetId ? [...others.values()].filter((actor) => actor.id === shot.targetId) : [...others.values()];
+      for (const target of playerTargets) {
+        if (!isAttackableActor(target)) continue;
+        if (dist(shot.x, shot.y, target.x, target.y) < 17) {
+          hitRemotePlayer(target, shot, Math.atan2(shot.vy, shot.vx));
           projectiles.splice(i, 1);
           break;
         }
@@ -2091,6 +2106,7 @@ function updateProjectiles(dt) {
         projectiles.splice(i, 1);
         continue;
       }
+      if (shot.damage <= 0) continue;
       if (dist(shot.x, shot.y, player.x, player.y) < 17) {
         hitPlayer(shot.damage);
         projectiles.splice(i, 1);
@@ -2132,12 +2148,14 @@ function updateParticles(dt) {
   }
 }
 
-function updateRemotePlayers() {
+function updateRemotePlayers(dt) {
   const cutoff = Date.now() - 4200;
   for (const [id, remote] of others) {
     if (remote.lastSeen < cutoff) {
       others.delete(id);
+      continue;
     }
+    smoothNetworkActor(remote, dt);
   }
 }
 
@@ -2191,27 +2209,125 @@ function completeGather(actor, res, isPlayer) {
 }
 
 function startAttack(target) {
-  if (!target?.isBot || isBotDefeated(target)) return;
+  if (!isAttackableActor(target)) return;
   playSfx("ui", 0.55);
   selected = { kind: "player", id: target.id, actor: target };
   player.attackTargetId = target.id;
+  focusCombatTarget(target);
   player.action = null;
   ui.actionLine.textContent = `${currentWeapon().name} ready. Engaging ${target.name}.`;
   setFocusForPlayer(target);
 }
 
+function isAttackableActor(actor) {
+  if (!actor || actor.id === player.id) return false;
+  if (actor.isBot) return !isBotDefeated(actor);
+  return actor.hp == null || actor.hp > 0;
+}
+
+function findAttackTarget(id) {
+  if (!id) return null;
+  const bot = bots.find((item) => item.id === id);
+  if (isAttackableActor(bot)) return bot;
+  const traveler = others.get(id);
+  return isAttackableActor(traveler) ? traveler : null;
+}
+
+function focusCombatTarget(actor, duration = COMBAT_TARGET_HUD_MS) {
+  if (!isAttackableActor(actor)) return;
+  combatTargetId = actor.id;
+  combatTargetVisibleUntil = now + duration;
+}
+
+function clearCombatTarget() {
+  combatTargetId = null;
+  combatTargetVisibleUntil = 0;
+}
+
+function hitRemotePlayer(target, weapon, facing = player.facing) {
+  if (!target || target.id === player.id) return;
+  focusCombatTarget(target);
+  addFloat(target.x, target.y - 38, `-${weapon.damage}`);
+  sparkle(target.x, target.y - 10, "#f0b66d", 14);
+  announce("pvp-hit", {
+    targetId: target.id,
+    attackerId: player.id,
+    attackerName: player.name,
+    weaponId: weapon.id,
+    weaponName: weapon.name,
+    damage: weapon.damage,
+    x: target.x,
+    y: target.y,
+    facing,
+  });
+  ui.actionLine.textContent = `${weapon.name} hit ${target.name || "Traveler"}.`;
+}
+
+function showRemoteAttack(message) {
+  const actor = others.get(message.id);
+  if (!actor) return;
+  actor.weaponId = message.weaponId || actor.weaponId || "stick";
+  actor.swingUntil = now + Math.max(120, Number(message.swingMs) || 180);
+  actor.facing = Number(message.facing) || actor.facing || 0;
+  if (message.targetX != null && message.targetY != null) {
+    const weapon = itemForKey(actor.weaponId, { includeLocked: true }) || weapons[0];
+    if (weapon.speed > 0) {
+      fireProjectileAt(actor, Number(message.targetX), Number(message.targetY), { ...weapon, damage: 0 }, message.targetId || null);
+    }
+  }
+}
+
+function applyPvpHit(message) {
+  const damage = Math.max(0, Number(message.damage) || 0);
+  const x = Number(message.x) || player.x;
+  const y = Number(message.y) || player.y;
+
+  if (message.targetId === player.id) {
+    hitPlayer(damage);
+    ui.actionLine.textContent = `${message.attackerName || "Traveler"} hit you with ${message.weaponName || "a weapon"}.`;
+    announce("player");
+    return;
+  }
+
+  const target = others.get(message.targetId);
+  if (target) {
+    target.hp = Math.max(0, (target.hp ?? target.maxHp ?? 5) - damage);
+    target.hitUntil = now + 220;
+    addFloat(target.x, target.y - 38, `-${damage}`);
+  } else {
+    addFloat(x, y - 38, `-${damage}`);
+  }
+  sparkle(x, y - 10, "#f0b66d", 12);
+}
+
 function useWeaponOnBot(bot, weapon) {
+  useWeaponOnActor(bot, weapon);
+}
+
+function useWeaponOnActor(target, weapon) {
+  focusCombatTarget(target);
   player.attackCooldown = weapon.cooldown;
   player.swingUntil = now + (weapon.type === "melee" ? 260 : 150);
-  player.facing = Math.atan2(bot.y - player.y, bot.x - player.x);
+  player.facing = Math.atan2(target.y - player.y, target.x - player.x);
   const sfxName = weapon.type === "melee" ? "melee" : weapon.type === "laser" ? "laser" : "shot";
   playSfx(sfxName);
   announceSfx(sfxName, player.x, player.y - 6, 0.84, weapon.type === "melee" ? 420 : 680);
+  announce("pvp-attack", {
+    weaponId: weapon.id,
+    x: player.x,
+    y: player.y,
+    facing: player.facing,
+    swingMs: weapon.type === "melee" ? 260 : 150,
+    targetId: target.id,
+    targetX: target.x,
+    targetY: target.y,
+  });
 
   if (weapon.type === "melee") {
-    hitBot(bot, weapon.damage, weapon.name);
+    if (target.isBot) hitBot(target, weapon.damage, weapon.name);
+    else hitRemotePlayer(target, weapon, player.facing);
   } else {
-    fireProjectile(player, bot, weapon);
+    fireProjectile(player, target, weapon);
     if (weapon.type === "laser") {
       sparkle(player.x + Math.cos(player.facing) * 18, player.y + Math.sin(player.facing) * 18, weapon.color, 8);
     }
@@ -2222,19 +2338,22 @@ function attackAt(world) {
   if (player.dazedUntil > now) return;
   const weapon = currentWeapon();
   const thing = pickWorldThing(world.x, world.y);
-  const target = thing?.kind === "player" && thing.actor.isBot ? thing.actor : null;
+  const target = thing?.kind === "player" && isAttackableActor(thing.actor) ? thing.actor : null;
   player.attackTargetId = null;
   player.action = null;
   player.facing = Math.atan2(world.y - player.y, world.x - player.x);
 
-  if (target && !isBotDefeated(target)) {
+  if (target) {
     selected = thing;
+    player.attackTargetId = target.id;
+    focusCombatTarget(target);
     setFocusForPlayer(target);
-    if (player.attackCooldown <= 0 && dist(player.x, player.y, target.x, target.y) <= weapon.range) useWeaponOnBot(target, weapon);
+    if (player.attackCooldown <= 0 && dist(player.x, player.y, target.x, target.y) <= weapon.range) useWeaponOnActor(target, weapon);
     else if (player.attackCooldown <= 0) attackAtPoint(world, weapon);
     return;
   }
 
+  clearCombatTarget();
   if (player.attackCooldown > 0) return;
   attackAtPoint(world, weapon);
 }
@@ -2246,11 +2365,30 @@ function attackAtPoint(world, weapon) {
   const sfxName = weapon.type === "melee" ? "melee" : weapon.type === "laser" ? "laser" : "shot";
   playSfx(sfxName);
   announceSfx(sfxName, player.x, player.y - 6, 0.84, weapon.type === "melee" ? 420 : 680);
+  announce("pvp-attack", {
+    weaponId: weapon.id,
+    x: player.x,
+    y: player.y,
+    facing: player.facing,
+    swingMs: weapon.type === "melee" ? 260 : 150,
+    targetX: world.x,
+    targetY: world.y,
+  });
 
   if (weapon.type === "melee") {
     const bot = findMeleeHit(weapon, player.facing);
-    if (bot) hitBot(bot, weapon.damage, weapon.name);
-    else ui.actionLine.textContent = `${weapon.name} swing.`;
+    const traveler = findMeleePlayerHit(weapon, player.facing);
+    if (bot) {
+      player.attackTargetId = bot.id;
+      focusCombatTarget(bot);
+      hitBot(bot, weapon.damage, weapon.name);
+    } else if (traveler) {
+      player.attackTargetId = traveler.id;
+      focusCombatTarget(traveler);
+      hitRemotePlayer(traveler, weapon, player.facing);
+    } else {
+      ui.actionLine.textContent = `${weapon.name} swing.`;
+    }
   } else {
     fireProjectileAt(player, world.x, world.y, weapon);
     if (weapon.type === "laser") {
@@ -2371,11 +2509,14 @@ function lineAbility(name, range, width, damage, color) {
 
 function chainAbility(name, range, maxHits, damage, color) {
   abilityAimPoint(range);
-  const targets = bots
-    .filter((bot) => !isBotDefeated(bot) && dist(player.x, player.y, bot.x, bot.y) <= range)
+  const targets = [...bots.filter((bot) => !isBotDefeated(bot)), ...[...others.values()].filter((actor) => isAttackableActor(actor))]
+    .filter((actor) => dist(player.x, player.y, actor.x, actor.y) <= range)
     .sort((a, b) => dist(player.x, player.y, a.x, a.y) - dist(player.x, player.y, b.x, b.y))
     .slice(0, maxHits);
-  for (const bot of targets) hitBot(bot, damage, name);
+  for (const target of targets) {
+    if (target.isBot) hitBot(target, damage, name);
+    else hitRemotePlayer(target, { id: "ability", name, damage }, Math.atan2(target.y - player.y, target.x - player.x));
+  }
   sparkle(player.x + Math.cos(player.facing) * 28, player.y + Math.sin(player.facing) * 28, color, targets.length ? 18 : 8);
   ui.actionLine.textContent = targets.length ? `${name} jumps through ${targets.length}.` : `${name} finds no target.`;
   return true;
@@ -2409,6 +2550,7 @@ function hitBotsInArc(range, cone, damage, name) {
       hits += 1;
     }
   }
+  hits += hitPlayersInArc(range, cone, damage, name);
   return hits;
 }
 
@@ -2421,6 +2563,7 @@ function hitBotsInArea(x, y, radius, damage, name) {
       hits += 1;
     }
   }
+  hits += hitPlayersInArea(x, y, radius, damage, name);
   return hits;
 }
 
@@ -2430,6 +2573,46 @@ function hitBotsOnLine(x1, y1, x2, y2, width, damage, name) {
     if (isBotDefeated(bot)) continue;
     if (pointSegmentDistance(bot.x, bot.y, x1, y1, x2, y2) <= width) {
       hitBot(bot, damage, name);
+      hits += 1;
+    }
+  }
+  hits += hitPlayersOnLine(x1, y1, x2, y2, width, damage, name);
+  return hits;
+}
+
+function hitPlayersInArc(range, cone, damage, name) {
+  let hits = 0;
+  for (const actor of others.values()) {
+    if (!isAttackableActor(actor)) continue;
+    const d = dist(player.x, player.y, actor.x, actor.y);
+    if (d > range) continue;
+    const a = Math.atan2(actor.y - player.y, actor.x - player.x);
+    if (Math.abs(angleDelta(player.facing, a)) <= cone) {
+      hitRemotePlayer(actor, { id: "ability", name, damage }, a);
+      hits += 1;
+    }
+  }
+  return hits;
+}
+
+function hitPlayersInArea(x, y, radius, damage, name) {
+  let hits = 0;
+  for (const actor of others.values()) {
+    if (!isAttackableActor(actor)) continue;
+    if (dist(x, y, actor.x, actor.y) <= radius) {
+      hitRemotePlayer(actor, { id: "ability", name, damage }, Math.atan2(actor.y - player.y, actor.x - player.x));
+      hits += 1;
+    }
+  }
+  return hits;
+}
+
+function hitPlayersOnLine(x1, y1, x2, y2, width, damage, name) {
+  let hits = 0;
+  for (const actor of others.values()) {
+    if (!isAttackableActor(actor)) continue;
+    if (pointSegmentDistance(actor.x, actor.y, x1, y1, x2, y2) <= width) {
+      hitRemotePlayer(actor, { id: "ability", name, damage }, Math.atan2(y2 - y1, x2 - x1));
       hits += 1;
     }
   }
@@ -2480,6 +2663,23 @@ function findMeleeHit(weapon, angle) {
     const delta = Math.abs(angleDelta(angle, a));
     if (delta < 0.9) {
       best = bot;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+function findMeleePlayerHit(weapon, angle) {
+  let best = null;
+  let bestD = weapon.range + 12;
+  for (const actor of others.values()) {
+    if (!isAttackableActor(actor)) continue;
+    const d = dist(player.x, player.y, actor.x, actor.y);
+    if (d > bestD) continue;
+    const a = Math.atan2(actor.y - player.y, actor.x - player.x);
+    const delta = Math.abs(angleDelta(angle, a));
+    if (delta < 0.9) {
+      best = actor;
       bestD = d;
     }
   }
@@ -2540,6 +2740,8 @@ function hitBot(bot, damage = 1, weaponName = "Sword") {
   } else {
     ui.actionLine.textContent = `${weaponName} hit ${bot.name}.`;
   }
+  announce("bot-update", { bot: serializeBot(bot, Date.now()), droppedLoot: serializeDroppedLoot() });
+  scheduleRemoteWorldSave();
 }
 
 function hitPlayer(damage = 1) {
@@ -2601,6 +2803,8 @@ function collectLoot(loot) {
   playSfx("loot");
   ui.actionLine.textContent = `Picked up ${inventorySummary(loot.items)}.`;
   selected = null;
+  announce("loot-state", { droppedLoot: serializeDroppedLoot() });
+  scheduleRemoteWorldSave();
 }
 
 function respawnBot(bot) {
@@ -2617,6 +2821,8 @@ function respawnBot(bot) {
   bot.attackCooldown = 0;
   sparkle(bot.x, bot.y, "#c9f28c", 24);
   playSfx("plant", 0.45);
+  announce("bot-update", { bot: serializeBot(bot, Date.now()), droppedLoot: serializeDroppedLoot() });
+  scheduleRemoteWorldSave();
 }
 
 function isBotDefeated(bot) {
@@ -3134,8 +3340,6 @@ function drawActor(actor, isSelf) {
   }
   ctx.restore();
 
-  if (isSelf) drawPlayerManaCircle(actor, bob);
-
   if (isSelf || actor.isBot || dist(actor.x, actor.y, player.x, player.y) < 360) {
     ctx.save();
     ctx.translate(actor.x, actor.y - 32 + bob);
@@ -3149,32 +3353,6 @@ function drawActor(actor, isSelf) {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(label, 0, -3);
-    ctx.restore();
-  }
-
-  if (actor.isBot && actor.maxHp) {
-    const hp = clamp(actor.hp / actor.maxHp, 0, 1);
-    ctx.save();
-    ctx.translate(actor.x, actor.y + 35 + bob);
-    ctx.fillStyle = "rgba(20, 29, 25, 0.48)";
-    roundRect(-14, -3, 28, 6, 3);
-    ctx.fill();
-    ctx.fillStyle = hp > 0.45 ? "#bfe878" : "#f0b66d";
-    roundRect(-14, -3, 28 * hp, 6, 3);
-    ctx.fill();
-    ctx.restore();
-  }
-
-  if (isSelf) {
-    const hp = clamp(player.hp / player.maxHp, 0, 1);
-    ctx.save();
-    ctx.translate(actor.x, actor.y + 35 + bob);
-    ctx.fillStyle = "rgba(20, 29, 25, 0.48)";
-    roundRect(-17, -3, 34, 6, 3);
-    ctx.fill();
-    ctx.fillStyle = hp > 0.45 ? "#bfe878" : "#f0b66d";
-    roundRect(-17, -3, 34 * hp, 6, 3);
-    ctx.fill();
     ctx.restore();
   }
 
@@ -3284,13 +3462,14 @@ function drawHumanTraveler(actor, isSelf) {
   ctx.arc(0.5 + lookX, -10.4 + lookY, 2.1, 0.2, Math.PI - 0.2);
   ctx.stroke();
 
-  if (isSelf && !actor.action) drawSword(actor);
+  if (!actor.action) drawWeapon(actor, isSelf);
 }
 
-function drawSword(actor) {
-  const weapon = currentWeapon();
+function drawWeapon(actor, isSelf = false) {
+  const weapon = weaponForActor(actor, isSelf);
   const active = actor.swingUntil > now;
-  const swing = active ? Math.sin((1 - (actor.swingUntil - now) / 260) * Math.PI) : 0;
+  const swingDuration = weapon.type === "melee" ? 260 : 150;
+  const swing = active ? Math.sin((1 - (actor.swingUntil - now) / swingDuration) * Math.PI) : 0;
   const base = actor.facing || 0;
   const angle = base - 0.72 + swing * 1.45;
   const gripX = 10;
@@ -3351,6 +3530,11 @@ function drawSword(actor) {
     ctx.arc(0, -2, 28, base - 1.15, base + 0.45);
     ctx.stroke();
   }
+}
+
+function weaponForActor(actor, isSelf = false) {
+  if (isSelf || actor.id === player.id) return currentWeapon();
+  return itemForKey(actor.weaponId, { includeLocked: true }) || itemForKey("stick", { includeLocked: true }) || weapons[0];
 }
 
 function drawParticles(front) {
@@ -3546,6 +3730,7 @@ function setHeldMoveTarget() {
 function setPlayerMoveTarget(world, mode = "click") {
   selected = null;
   player.attackTargetId = null;
+  clearCombatTarget();
   player.action = null;
   if (mode !== "hold") moveGuideTarget = null;
   player.tx = clamp(world.x, 28, WORLD.w - 28);
@@ -3564,16 +3749,19 @@ function handleWorldCommand(world) {
   const thing = pickWorldThing(world.x, world.y);
   if (thing?.kind === "loot") {
     player.attackTargetId = null;
+    clearCombatTarget();
     selected = thing;
     walkToLoot(thing.loot);
     setFocusForLoot(thing.loot);
   } else if (thing?.kind === "resource") {
     player.attackTargetId = null;
+    clearCombatTarget();
     selected = thing;
     walkToResource(thing.resource);
     setFocusForResource(thing.resource);
   } else if (thing?.kind === "player") {
     player.attackTargetId = null;
+    clearCombatTarget();
     selected = thing;
     setFocusForPlayer(thing.actor);
     followSelf = true;
@@ -3678,6 +3866,7 @@ function placeCurrentBuild() {
   sparkle(building.x, building.y, "#d4ad62", 18);
   playSfx("build");
   announceSfx("build", building.x, building.y, 0.86, 720);
+  announce("building-update", { building });
   ui.actionLine.textContent = `${piece.name} placed.`;
   updateBuildPreview(lastPointerWorld);
   renderBuildPanel();
@@ -3719,6 +3908,7 @@ function buildRect(building) {
 
 function saveBuildings() {
   saveJson(BUILD_KEY, buildings);
+  scheduleRemoteWorldSave();
 }
 
 function plantTree() {
@@ -3736,6 +3926,7 @@ function plantTree() {
   inventory.wood -= 3;
   const id = `planted-${Date.now()}-${Math.floor(Math.random() * 9999)}`;
   resources.push({ id, type: "tree", x: p.x, y: p.y, r: 28, tint: "#79ad67", planted: true });
+  savePlantedResources();
   saveJson(INV_KEY, inventory);
   refreshInventoryPanel();
   if (craftOpen) renderCraftPanel();
@@ -3743,6 +3934,7 @@ function plantTree() {
   addFloat(p.x, p.y - 30, "sapling");
   playSfx("plant");
   announceSfx("plant", p.x, p.y, 0.82, 760);
+  announce("planted-resources", { planted: currentPlantedResources() });
   ui.actionLine.textContent = "A young tree takes root.";
 }
 
@@ -3772,7 +3964,9 @@ function setFocusForPlayer(actor) {
     const aggro = actor.aggroUntil > now ? " Fighting back." : "";
     ui.focusDetail.textContent = `${rest}.${aggro} Left-click to fight.`;
   } else {
-    ui.focusDetail.textContent = "Another traveler in the shared grove.";
+    const hp = actor.maxHp ? ` Health ${actor.hp}/${actor.maxHp}.` : "";
+    const weapon = weaponForActor(actor, false);
+    ui.focusDetail.textContent = `Another traveler in the shared grove.${hp} ${weapon.name} equipped. Left-click to fight.`;
   }
 }
 
@@ -3782,9 +3976,8 @@ function updateHud() {
   ui.stone.textContent = inventory.stone;
   ui.flower.textContent = inventory.flower;
   ui.cotton.textContent = inventory.cotton;
-  const energyPct = clamp(player.energy / player.maxEnergy, 0, 1);
-  ui.energyProgress.style.width = `${Math.round(energyPct * 100)}%`;
-  ui.energyCount.textContent = `${Math.ceil(player.energy)}/${player.maxEnergy}`;
+  updatePlayerStatusHud();
+  updateTargetStatusHud();
   updateAbilityBar();
   renderBuildPanel();
   if (craftOpen) renderCraftPanel();
@@ -3800,6 +3993,46 @@ function updateHud() {
   if (selected?.kind === "resource") setFocusForResource(selected.resource);
   if (selected?.kind === "player") setFocusForPlayer(selected.actor);
   if (selected?.kind === "loot") setFocusForLoot(selected.loot);
+}
+
+function updatePlayerStatusHud() {
+  const hpPct = clamp(player.hp / player.maxHp, 0, 1);
+  const energyPct = clamp(player.energy / player.maxEnergy, 0, 1);
+  ui.playerName.textContent = player.name;
+  ui.healthProgress.style.width = `${Math.round(hpPct * 100)}%`;
+  ui.healthCount.textContent = `${player.hp}/${player.maxHp}`;
+  ui.energyProgress.style.width = `${Math.round(energyPct * 100)}%`;
+  ui.energyCount.textContent = `${Math.ceil(player.energy)}/${player.maxEnergy}`;
+  applyAvatarStyle(ui.playerAvatar, player);
+}
+
+function updateTargetStatusHud() {
+  const target =
+    findAttackTarget(player.attackTargetId) ||
+    (now < combatTargetVisibleUntil ? findAttackTarget(combatTargetId) : null);
+  if (!target) {
+    ui.targetHud.hidden = true;
+    ui.targetHud.setAttribute("aria-hidden", "true");
+    return;
+  }
+
+  const maxHp = target.maxHp || 1;
+  const hp = clamp(target.hp ?? maxHp, 0, maxHp);
+  const hpPct = clamp(hp / maxHp, 0, 1);
+  ui.targetHud.hidden = false;
+  ui.targetHud.setAttribute("aria-hidden", "false");
+  ui.targetName.textContent = target.name || "Traveler";
+  ui.targetDetail.textContent = target.isBot ? "Bot" : "Traveler";
+  ui.targetHealthProgress.style.width = `${Math.round(hpPct * 100)}%`;
+  ui.targetHealthCount.textContent = `${Math.ceil(hp)}/${maxHp}`;
+  applyAvatarStyle(ui.targetAvatar, target);
+}
+
+function applyAvatarStyle(element, actor) {
+  if (!element || !actor) return;
+  element.style.setProperty("--tunic", actor.color || "#f3cf75");
+  element.style.setProperty("--skin", actor.skin || "#f0c59b");
+  element.style.setProperty("--hair", actor.hair || "#5a3929");
 }
 
 function updateGatherHud() {
@@ -3863,20 +4096,25 @@ function makeResources() {
 
 function makeBots() {
   const names = ["Mika", "Tavi", "Jun", "Pip", "Nora", "Sol", "Ivo", "Lumi", "Bea"];
+  const rng = mulberry32(91377);
+  const colors = ["#eeb1ba", "#f0d16f", "#95d7e8", "#b8db86", "#cfb2ed"];
+  const skins = ["#f0c59b", "#dba577", "#c98b65", "#f4d2ad"];
+  const hair = ["#5a3929", "#75543d", "#2f2a25", "#c08245", "#e2c06f"];
+  const pants = ["#516d75", "#6b7351", "#665d7e", "#5b6c54"];
   for (let i = 0; i < 9; i++) {
     bots.push({
       id: `bot-${i}`,
       name: names[i],
-      x: WORLD.w / 2 + randRange(-700, 700),
-      y: WORLD.h / 2 + randRange(-520, 520),
+      x: WORLD.w / 2 + randRangeSeed(rng, -700, 700),
+      y: WORLD.h / 2 + randRangeSeed(rng, -520, 520),
       tx: null,
       ty: null,
-      speed: randRange(120, 165),
-      color: pick(["#eeb1ba", "#f0d16f", "#95d7e8", "#b8db86", "#cfb2ed"]),
-      skin: pick(["#f0c59b", "#dba577", "#c98b65", "#f4d2ad"]),
-      hair: pick(["#5a3929", "#75543d", "#2f2a25", "#c08245", "#e2c06f"]),
-      pants: pick(["#516d75", "#6b7351", "#665d7e", "#5b6c54"]),
-      facing: randRange(-Math.PI, Math.PI),
+      speed: randRangeSeed(rng, 120, 165),
+      color: pick(colors, rng),
+      skin: pick(skins, rng),
+      hair: pick(hair, rng),
+      pants: pick(pants, rng),
+      facing: randRangeSeed(rng, -Math.PI, Math.PI),
       action: null,
       intent: null,
       hp: 3,
@@ -3884,9 +4122,9 @@ function makeBots() {
       defeatedUntil: 0,
       hitUntil: 0,
       aggroUntil: 0,
-      attackCooldown: randRange(0.4, 1.2),
+      attackCooldown: randRangeSeed(rng, 0.4, 1.2),
       inventory: emptyInventory(),
-      mood: Math.random() * 5,
+      mood: rng() * 5,
       isBot: true,
     });
   }
@@ -3899,7 +4137,7 @@ function pickWorldThing(x, y) {
   for (const actor of actors) {
     if (isBotDefeated(actor)) continue;
     const d = dist(x, y, actor.x, actor.y);
-    const radius = actor.isBot ? 52 : 24;
+    const radius = actor.isBot ? 62 : 44;
     if (d < radius && d < bestActorD) {
       bestActor = actor;
       bestActorD = d;
@@ -4325,7 +4563,6 @@ function addFloat(x, y, text) {
 }
 
 function announce(type, payload = {}) {
-  if (!channel) return;
   const message = { id: CLIENT_ID, type, ...payload };
   if (type === "hello" || type === "player") {
     message.player = {
@@ -4341,13 +4578,609 @@ function announce(type, payload = {}) {
       pants: player.pants,
       facing: player.facing,
       action: player.action,
+      hp: player.hp,
+      maxHp: player.maxHp,
+      weaponId: currentWeapon().id,
+      swingMs: Math.max(0, player.swingUntil - now),
+      hitMs: Math.max(0, player.hitUntil - now),
+      dazedMs: Math.max(0, player.dazedUntil - now),
+      guardMs: Math.max(0, player.guardUntil - now),
+      sentAt: Date.now(),
     };
   }
-  channel.postMessage(message);
+  if (channel) channel.postMessage(message);
+  sendOnlineMessage(message);
 }
 
 function saveResourceState() {
   saveJson(RESOURCE_VERSION, resourceState);
+  scheduleRemoteWorldSave();
+}
+
+function handlePeerMessage(message) {
+  if (!message || message.id === CLIENT_ID) return;
+
+  if (message.type === "hello") {
+    announce("player");
+    announce("resource-state", { state: resourceState });
+    announce("buildings-state", { buildings });
+    announce("planted-resources", { planted: currentPlantedResources() });
+    return;
+  }
+
+  if (message.type === "leave") {
+    others.delete(message.id);
+    return;
+  }
+
+  if (message.type === "player") {
+    receiveRemotePlayer(message.player);
+    return;
+  }
+
+  if (message.type === "sfx" && message.sfx) {
+    playWorldSfx(message.sfx.name, message.sfx.x, message.sfx.y, message.sfx.intensity, message.sfx.range);
+    return;
+  }
+
+  if (message.type === "resource-state") {
+    online.applyingRemote = true;
+    Object.assign(resourceState, message.state || {});
+    saveResourceState();
+    online.applyingRemote = false;
+    return;
+  }
+
+  if (message.type === "resource-update") {
+    online.applyingRemote = true;
+    if (message.state) resourceState[message.resourceId] = message.state;
+    else delete resourceState[message.resourceId];
+    saveResourceState();
+    online.applyingRemote = false;
+    const res = resources.find((item) => item.id === message.resourceId);
+    if (res) {
+      sparkle(res.x, res.y, message.state?.depletedUntil ? "#f2d37a" : "#b9ef91", 12);
+      if (message.state?.depletedUntil) playWorldSfx("complete", res.x, res.y, 0.58, 840);
+    }
+    return;
+  }
+
+  if (message.type === "buildings-state") {
+    mergeBuildings(message.buildings || []);
+    return;
+  }
+
+  if (message.type === "building-update" && message.building) {
+    mergeBuildings([message.building]);
+    sparkle(message.building.x, message.building.y, "#d4ad62", 12);
+    return;
+  }
+
+  if (message.type === "planted-resources") {
+    applyPlantedResources(message.planted || []);
+    return;
+  }
+
+  if (message.type === "bot-state") {
+    if (shouldAcceptBotStateFrom(message.id)) {
+      applyBotState(message.bots || []);
+      applyDroppedLootState(message.droppedLoot || []);
+    }
+    return;
+  }
+
+  if (message.type === "bot-update" && message.bot) {
+    mergeBot(message.bot);
+    applyDroppedLootState(message.droppedLoot || serializeDroppedLoot());
+    return;
+  }
+
+  if (message.type === "loot-state") {
+    applyDroppedLootState(message.droppedLoot || []);
+    return;
+  }
+
+  if (message.type === "pvp-attack") {
+    showRemoteAttack(message);
+    return;
+  }
+
+  if (message.type === "pvp-hit") {
+    applyPvpHit(message);
+    return;
+  }
+
+  if (message.type === "wave") {
+    addFloat(message.x, message.y - 35, `${message.name || "Traveler"} waves`);
+    playWorldSfx("wave", message.x, message.y, 0.84, 860);
+  }
+}
+
+function sendOnlineMessage(message) {
+  if (!online.connected || !online.channel) return;
+  online.channel.send({ type: "broadcast", event: "game", payload: { message } }).catch((error) => {
+    console.warn("Mossvale realtime send failed", error);
+  });
+}
+
+async function connectOnlineWorld() {
+  const config = readSupabaseConfig();
+  if (!config) return;
+
+  online.worldId = config.worldId || "main";
+
+  try {
+    const { createClient } = await import(SUPABASE_IMPORT_URL);
+    online.client = createClient(config.url, config.publishableKey, {
+      auth: {
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+        persistSession: false,
+      },
+    });
+
+    await loadRemoteWorldState();
+
+    online.channel = online.client
+      .channel(`mossvale:${online.worldId}`)
+      .on("broadcast", { event: "game" }, ({ payload }) => handlePeerMessage(payload?.message))
+      .subscribe((status, error) => {
+        online.connected = status === "SUBSCRIBED";
+        if (online.connected) {
+          announce("hello");
+          scheduleRemoteWorldSave();
+          return;
+        }
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          console.warn("Mossvale realtime subscription failed", status, error);
+        }
+      });
+  } catch (error) {
+    console.warn("Mossvale is running in local mode; Supabase could not connect.", error);
+  }
+}
+
+function readSupabaseConfig() {
+  const fromWindow = window.MOSSVALE_SUPABASE || {};
+  const fromStorage = loadJson("mossvale_supabase_config", {});
+  const params = new URLSearchParams(window.location.search);
+  const config = {
+    url: params.get("supabaseUrl") || fromStorage.url || fromWindow.url,
+    publishableKey:
+      params.get("supabaseKey") ||
+      fromStorage.publishableKey ||
+      fromStorage.anonKey ||
+      fromWindow.publishableKey ||
+      fromWindow.anonKey,
+    worldId: params.get("world") || fromStorage.worldId || fromWindow.worldId || "main",
+  };
+
+  if (!config.url || !config.publishableKey) return null;
+  return config;
+}
+
+async function loadRemoteWorldState() {
+  if (!online.client) return;
+
+  const { data, error } = await online.client
+    .from("mossvale_worlds")
+    .select("resources, buildings, planted_resources, bots, dropped_loot")
+    .eq("id", online.worldId)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Mossvale world load failed", error);
+    return;
+  }
+
+  if (!data) {
+    await persistRemoteWorld();
+    return;
+  }
+
+  applyRemoteWorldState(data);
+}
+
+function applyRemoteWorldState(world) {
+  online.applyingRemote = true;
+
+  clearObject(resourceState);
+  Object.assign(resourceState, world.resources || {});
+  saveResourceState();
+
+  buildings.splice(0, buildings.length, ...sanitizeBuildings(world.buildings || []));
+  saveBuildings();
+
+  applyPlantedResources(world.planted_resources || []);
+  applyBotState(world.bots || []);
+  applyDroppedLootState(world.dropped_loot || []);
+
+  online.applyingRemote = false;
+}
+
+function scheduleRemoteWorldSave() {
+  if (!online.client || online.applyingRemote) return;
+  clearTimeout(online.saveTimer);
+  online.saveTimer = setTimeout(persistRemoteWorld, 650);
+}
+
+async function persistRemoteWorld() {
+  if (!online.client) return;
+  clearTimeout(online.saveTimer);
+  online.saveTimer = null;
+
+  const { error } = await online.client.from("mossvale_worlds").upsert(
+    {
+      id: online.worldId,
+      resources: { ...resourceState },
+      buildings: sanitizeBuildings(buildings),
+      planted_resources: currentPlantedResources(),
+      bots: serializeBots(),
+      dropped_loot: serializeDroppedLoot(),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "id" }
+  );
+
+  if (error) console.warn("Mossvale world save failed", error);
+}
+
+function mergeBuildings(incoming = []) {
+  const next = new Map(buildings.map((building) => [building.id, building]));
+  for (const building of sanitizeBuildings(incoming)) {
+    next.set(building.id, building);
+  }
+  buildings.splice(0, buildings.length, ...next.values());
+  saveBuildings();
+}
+
+function sanitizeBuildings(items = []) {
+  return items
+    .filter((item) => item && item.id && item.type)
+    .map((item) => ({
+      id: String(item.id).slice(0, 80),
+      type: String(item.type).slice(0, 40),
+      x: Number(item.x) || 0,
+      y: Number(item.y) || 0,
+      rot: Number(item.rot) || 0,
+      w: Number(item.w) || 0,
+      h: Number(item.h) || 0,
+      blocks: Boolean(item.blocks),
+      color: item.color || "#9a6b43",
+    }));
+}
+
+function savePlantedResources() {
+  saveJson(PLANTED_KEY, currentPlantedResources());
+  scheduleRemoteWorldSave();
+}
+
+function applyPlantedResources(planted = [], options = {}) {
+  const clean = planted
+    .filter((item) => item && item.id)
+    .map((item) => ({
+      id: String(item.id).slice(0, 80),
+      type: "tree",
+      x: Number(item.x) || WORLD.w / 2,
+      y: Number(item.y) || WORLD.h / 2,
+      r: Number(item.r) || 28,
+      tint: item.tint || "#79ad67",
+      planted: true,
+    }));
+
+  for (let i = resources.length - 1; i >= 0; i--) {
+    if (resources[i].planted) resources.splice(i, 1);
+  }
+  resources.push(...clean);
+
+  if (options.save !== false) savePlantedResources();
+}
+
+function currentPlantedResources() {
+  return resources
+    .filter((res) => res.planted)
+    .map((res) => ({
+      id: res.id,
+      type: res.type,
+      x: res.x,
+      y: res.y,
+      r: res.r,
+      tint: res.tint,
+      planted: true,
+    }));
+}
+
+function currentBotHostId() {
+  const cutoff = Date.now() - 4200;
+  const ids = [CLIENT_ID];
+  for (const [id, actor] of others) {
+    if ((actor.lastSeen || 0) >= cutoff) ids.push(id);
+  }
+  return ids.sort()[0] || CLIENT_ID;
+}
+
+function isBotHost() {
+  return currentBotHostId() === CLIENT_ID;
+}
+
+function shouldAcceptBotStateFrom(id) {
+  if (!id || id === CLIENT_ID) return false;
+  return String(id) <= currentBotHostId();
+}
+
+function maybeBroadcastBotState() {
+  const at = Date.now();
+  if (at - online.lastBotBroadcastAt >= BOT_SYNC_INTERVAL_MS) {
+    online.lastBotBroadcastAt = at;
+    announce("bot-state", { hostId: CLIENT_ID, bots: serializeBots(), droppedLoot: serializeDroppedLoot() });
+  }
+  if (at - online.lastBotPersistAt >= BOT_PERSIST_INTERVAL_MS) {
+    online.lastBotPersistAt = at;
+    scheduleRemoteWorldSave();
+  }
+}
+
+function serializeBots() {
+  const sentAt = Date.now();
+  return bots.map((bot) => serializeBot(bot, sentAt));
+}
+
+function receiveRemotePlayer(remote) {
+  if (!remote?.id || remote.id === CLIENT_ID) return;
+  const sentAt = Number(remote.sentAt) || Date.now();
+  const next = {
+    ...remote,
+    lastSeen: Date.now(),
+    netX: Number(remote.x) || WORLD.w / 2,
+    netY: Number(remote.y) || WORLD.h / 2,
+    hp: clamp(remote.hp == null ? Number(remote.maxHp) || 5 : Number(remote.hp) || 0, 0, Number(remote.maxHp) || 5),
+    maxHp: clamp(Number(remote.maxHp) || 5, 1, 40),
+    weaponId: remote.weaponId || "stick",
+    swingUntil: now + Math.max(0, Number(remote.swingMs) || 0),
+    hitUntil: now + Math.max(0, Number(remote.hitMs) || 0),
+    dazedUntil: now + Math.max(0, Number(remote.dazedMs) || 0),
+    guardUntil: now + Math.max(0, Number(remote.guardMs) || 0),
+    sentAt,
+  };
+  const existing = others.get(remote.id);
+  if (existing) {
+    mergeNetworkActor(existing, next, { buffered: true, sentAt });
+  } else {
+    next.x = next.netX;
+    next.y = next.netY;
+    pushNetworkSnapshot(next, next.netX, next.netY, sentAt);
+    others.set(remote.id, next);
+  }
+}
+
+function updateNetworkBots(dt) {
+  for (const bot of bots) smoothNetworkActor(bot, dt);
+}
+
+function mergeNetworkActor(actor, next, options = {}) {
+  const previousX = actor.x;
+  const previousY = actor.y;
+  const targetX = Number(next.x) || previousX || WORLD.w / 2;
+  const targetY = Number(next.y) || previousY || WORLD.h / 2;
+  const snapshots = actor.netSnapshots;
+
+  Object.assign(actor, next);
+  actor.netSnapshots = snapshots || actor.netSnapshots || [];
+  actor.netX = targetX;
+  actor.netY = targetY;
+  pushNetworkSnapshot(actor, targetX, targetY, options.sentAt || next.sentAt || Date.now());
+
+  if (!options.buffered || previousX == null || previousY == null) {
+    actor.x = targetX;
+    actor.y = targetY;
+    return;
+  }
+
+  actor.x = previousX;
+  actor.y = previousY;
+
+  if (dist(previousX, previousY, targetX, targetY) > NETWORK_SNAP_DISTANCE) {
+    actor.x = targetX;
+    actor.y = targetY;
+  }
+}
+
+function smoothNetworkActor(actor, dt) {
+  if (actor.netX == null || actor.netY == null) return;
+  if (actor.netSnapshots?.length >= 2) {
+    interpolateNetworkActor(actor);
+    return;
+  }
+
+  const d = dist(actor.x, actor.y, actor.netX, actor.netY);
+  if (d > NETWORK_SNAP_DISTANCE) {
+    actor.x = actor.netX;
+    actor.y = actor.netY;
+    return;
+  }
+
+  const t = 1 - Math.exp(-NETWORK_SMOOTHING_SPEED * dt);
+  actor.x += (actor.netX - actor.x) * t;
+  actor.y += (actor.netY - actor.y) * t;
+  if (Math.abs(actor.netX - actor.x) + Math.abs(actor.netY - actor.y) < 0.4) {
+    actor.x = actor.netX;
+    actor.y = actor.netY;
+  }
+}
+
+function pushNetworkSnapshot(actor, x, y, sentAt = Date.now()) {
+  if (!actor.netSnapshots) actor.netSnapshots = [];
+  const lastSnapshot = actor.netSnapshots[actor.netSnapshots.length - 1];
+  if (lastSnapshot && sentAt <= lastSnapshot.t) sentAt = lastSnapshot.t + 1;
+  actor.netSnapshots.push({ t: sentAt, x, y });
+  while (actor.netSnapshots.length > 8) actor.netSnapshots.shift();
+}
+
+function interpolateNetworkActor(actor) {
+  const snapshots = actor.netSnapshots;
+  const renderAt = Date.now() - NETWORK_INTERPOLATION_DELAY_MS;
+
+  while (snapshots.length >= 3 && snapshots[1].t <= renderAt) snapshots.shift();
+
+  const from = snapshots[0];
+  const to = snapshots[1];
+  if (!from || !to) return;
+
+  if (dist(actor.x, actor.y, to.x, to.y) > NETWORK_SNAP_DISTANCE) {
+    actor.x = to.x;
+    actor.y = to.y;
+    return;
+  }
+
+  if (renderAt <= to.t) {
+    const span = Math.max(1, to.t - from.t);
+    const t = clamp((renderAt - from.t) / span, 0, 1);
+    actor.x = lerp(from.x, to.x, smoothstep(t));
+    actor.y = lerp(from.y, to.y, smoothstep(t));
+    return;
+  }
+
+  const lateBy = Math.min(NETWORK_MAX_EXTRAPOLATION_MS, renderAt - to.t);
+  const span = Math.max(1, to.t - from.t);
+  const vx = (to.x - from.x) / span;
+  const vy = (to.y - from.y) / span;
+  actor.x = to.x + vx * lateBy;
+  actor.y = to.y + vy * lateBy;
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function smoothstep(t) {
+  return t * t * (3 - 2 * t);
+}
+
+function serializeBot(bot, sentAt = Date.now()) {
+  return {
+    id: bot.id,
+    name: bot.name,
+    x: bot.x,
+    y: bot.y,
+    tx: bot.tx,
+    ty: bot.ty,
+    vx: bot.vx || 0,
+    vy: bot.vy || 0,
+    speed: bot.speed,
+    color: bot.color,
+    skin: bot.skin,
+    hair: bot.hair,
+    pants: bot.pants,
+    facing: bot.facing,
+    action: sanitizeBotAction(bot.action),
+    intent: bot.intent,
+    hp: bot.hp,
+    maxHp: bot.maxHp,
+    defeatedMs: Math.max(0, (bot.defeatedUntil || 0) - now),
+    hitMs: Math.max(0, (bot.hitUntil || 0) - now),
+    aggroMs: Math.max(0, (bot.aggroUntil || 0) - now),
+    attackCooldown: Math.max(0, bot.attackCooldown || 0),
+    inventory: normalizeInventory(bot.inventory || {}),
+    mood: bot.mood || 0,
+    sentAt,
+    isBot: true,
+  };
+}
+
+function applyBotState(nextBots = []) {
+  const incoming = sanitizeBots(nextBots);
+  if (!incoming.length) return;
+  for (const next of incoming) mergeBot(next);
+}
+
+function mergeBot(next) {
+  const [clean] = sanitizeBots([next]);
+  if (!clean) return;
+  const existing = bots.find((bot) => bot.id === clean.id);
+  if (existing) {
+    mergeNetworkActor(existing, clean, { buffered: !isBotHost(), sentAt: clean.sentAt });
+  } else {
+    clean.netX = clean.x;
+    clean.netY = clean.y;
+    pushNetworkSnapshot(clean, clean.x, clean.y, clean.sentAt);
+    bots.push(clean);
+  }
+}
+
+function sanitizeBots(items = []) {
+  return items
+    .filter((item) => item && item.id)
+    .map((item) => ({
+      id: String(item.id).slice(0, 80),
+      name: String(item.name || "Traveler").slice(0, 24),
+      x: clamp(Number(item.x) || WORLD.w / 2, 42, WORLD.w - 42),
+      y: clamp(Number(item.y) || WORLD.h / 2, 42, WORLD.h - 42),
+      tx: item.tx == null ? null : clamp(Number(item.tx) || WORLD.w / 2, 28, WORLD.w - 28),
+      ty: item.ty == null ? null : clamp(Number(item.ty) || WORLD.h / 2, 28, WORLD.h - 28),
+      vx: Number(item.vx) || 0,
+      vy: Number(item.vy) || 0,
+      speed: clamp(Number(item.speed) || PLAYER_BASE_SPEED, 80, 240),
+      color: item.color || "#f0d16f",
+      skin: item.skin || "#f0c59b",
+      hair: item.hair || "#5a3929",
+      pants: item.pants || "#516d75",
+      facing: Number(item.facing) || 0,
+      action: sanitizeBotAction(item.action),
+      intent: item.intent == null ? null : String(item.intent).slice(0, 80),
+      hp: clamp(Number(item.hp) || 0, 0, Number(item.maxHp) || 3),
+      maxHp: clamp(Number(item.maxHp) || 3, 1, 20),
+      defeatedUntil: now + Math.max(0, Number(item.defeatedMs) || 0),
+      hitUntil: now + Math.max(0, Number(item.hitMs) || 0),
+      aggroUntil: now + Math.max(0, Number(item.aggroMs) || 0),
+      attackCooldown: Math.max(0, Number(item.attackCooldown) || 0),
+      inventory: normalizeInventory(item.inventory || {}),
+      mood: Number(item.mood) || 0,
+      sentAt: Number(item.sentAt) || Date.now(),
+      isBot: true,
+    }));
+}
+
+function sanitizeBotAction(action) {
+  if (!action?.resourceId) return null;
+  return {
+    resourceId: String(action.resourceId).slice(0, 80),
+    nodeIndex: action.nodeIndex == null ? null : Number(action.nodeIndex) || 0,
+    elapsed: Math.max(0, Number(action.elapsed) || 0),
+    duration: Math.max(0.1, Number(action.duration) || 1),
+  };
+}
+
+function serializeDroppedLoot() {
+  return droppedLoot.map((loot) => ({
+    id: loot.id,
+    x: loot.x,
+    y: loot.y,
+    items: normalizeInventory(loot.items || {}),
+    from: loot.from || "",
+    bornAt: 0,
+  }));
+}
+
+function applyDroppedLootState(items = []) {
+  droppedLoot.splice(0, droppedLoot.length, ...sanitizeDroppedLoot(items));
+}
+
+function sanitizeDroppedLoot(items = []) {
+  return items
+    .filter((item) => item && item.id)
+    .map((item) => ({
+      id: String(item.id).slice(0, 80),
+      x: clamp(Number(item.x) || WORLD.w / 2, 28, WORLD.w - 28),
+      y: clamp(Number(item.y) || WORLD.h / 2, 28, WORLD.h - 28),
+      items: normalizeInventory(item.items || {}),
+      from: String(item.from || "").slice(0, 24),
+      bornAt: now,
+    }))
+    .filter((item) => inventoryTotal(item.items) > 0);
+}
+
+function clearObject(target) {
+  for (const key of Object.keys(target)) delete target[key];
 }
 
 function resize() {

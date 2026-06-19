@@ -5,17 +5,39 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mossvale Shared Grove</title>
     <link rel="icon" href="data:," />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=hud-target-2" />
   </head>
   <body>
     <canvas id="world" aria-label="Mossvale shared world"></canvas>
 
     <div class="hud top-left">
-      <div class="brand">
-        <span class="brand-mark"></span>
-        <div>
-          <strong>Mossvale</strong>
-          <span>shared grove</span>
+      <div class="player-card">
+        <div id="playerAvatar" class="traveler-avatar" aria-hidden="true">
+          <span class="avatar-body"></span>
+          <span class="avatar-head"></span>
+          <span class="avatar-hair"></span>
+        </div>
+        <div class="player-status">
+          <div class="tiny-row">
+            <span id="playerName">Sprout</span>
+            <button
+              id="renameBtn"
+              title="Rename character"
+              aria-label="Rename character"
+            >
+              rename
+            </button>
+          </div>
+          <div class="status-row health-row" aria-label="Health">
+            <span>HP</span>
+            <div class="health-shell"><span id="healthProgress"></span></div>
+            <strong id="healthCount">5/5</strong>
+          </div>
+          <div class="status-row energy-row" aria-label="Energy">
+            <span>EN</span>
+            <div class="energy-shell"><span id="energyProgress"></span></div>
+            <strong id="energyCount">24/24</strong>
+          </div>
         </div>
       </div>
       <div class="stats">
@@ -28,32 +50,102 @@
     </div>
 
     <div class="hud top-right">
-      <button id="homeBtn" class="icon-button" title="Follow your character" aria-label="Follow your character">⌂</button>
-      <button id="plantBtn" class="icon-button" title="Plant a young tree" aria-label="Plant a young tree">♧</button>
-      <button id="buildBtn" class="icon-button" title="Build with wood" aria-label="Build with wood">B</button>
-      <button id="craftBtn" class="icon-button" title="Craft items" aria-label="Craft items">C</button>
-      <button id="waveBtn" class="icon-button" title="Wave to nearby players" aria-label="Wave to nearby players">◌</button>
-      <button id="pauseBtn" class="icon-button" title="Pause local ambience" aria-label="Pause local ambience">Ⅱ</button>
+      <button
+        id="homeBtn"
+        class="icon-button"
+        title="Follow your character"
+        aria-label="Follow your character"
+      >
+        ⌂
+      </button>
+      <button
+        id="plantBtn"
+        class="icon-button"
+        title="Plant a young tree"
+        aria-label="Plant a young tree"
+      >
+        ♧
+      </button>
+      <button
+        id="buildBtn"
+        class="icon-button"
+        title="Build with wood"
+        aria-label="Build with wood"
+      >
+        B
+      </button>
+      <button
+        id="craftBtn"
+        class="icon-button"
+        title="Craft items"
+        aria-label="Craft items"
+      >
+        C
+      </button>
+      <button
+        id="waveBtn"
+        class="icon-button"
+        title="Wave to nearby players"
+        aria-label="Wave to nearby players"
+      >
+        ◌
+      </button>
+      <button
+        id="pauseBtn"
+        class="icon-button"
+        title="Pause local ambience"
+        aria-label="Pause local ambience"
+      >
+        Ⅱ
+      </button>
+    </div>
+
+    <div
+      class="hud target-hud"
+      id="targetHud"
+      hidden
+      aria-hidden="true"
+      aria-live="polite"
+    >
+      <div id="targetAvatar" class="traveler-avatar" aria-hidden="true">
+        <span class="avatar-body"></span>
+        <span class="avatar-head"></span>
+        <span class="avatar-hair"></span>
+      </div>
+      <div class="target-status">
+        <div class="target-title">
+          <strong id="targetName">Target</strong>
+          <small id="targetDetail">Fighting</small>
+        </div>
+        <div class="status-row health-row target-health" aria-label="Target health">
+          <span>HP</span>
+          <div class="health-shell"><span id="targetHealthProgress"></span></div>
+          <strong id="targetHealthCount">5/5</strong>
+        </div>
+      </div>
     </div>
 
     <div class="hud bottom-left" hidden aria-hidden="true">
-      <div class="tiny-row">
-        <span id="playerName">Sprout</span>
-        <button id="renameBtn" title="Rename character" aria-label="Rename character">rename</button>
+      <div class="action-line" id="actionLine">
+        Right-click to move or gather. Hold Shift to sprint. Left-click to
+        attack.
       </div>
-      <div class="energy-row" aria-label="Energy">
-        <span>Energy</span>
-        <div class="energy-shell"><span id="energyProgress"></span></div>
-        <strong id="energyCount">24/24</strong>
+      <div class="progress-shell" aria-hidden="true">
+        <span id="actionProgress"></span>
       </div>
-      <div class="action-line" id="actionLine">Right-click to move or gather. Hold Shift to sprint. Left-click to attack.</div>
-      <div class="progress-shell" aria-hidden="true"><span id="actionProgress"></span></div>
     </div>
 
-    <div class="hud bottom-right inspector" id="inspector" hidden aria-hidden="true">
+    <div
+      class="hud bottom-right inspector"
+      id="inspector"
+      hidden
+      aria-hidden="true"
+    >
       <div class="panel-title">Grove Focus</div>
       <div id="focusName">Nothing selected</div>
-      <small id="focusDetail">Right-click resources or loot. Left-click bots to attack.</small>
+      <small id="focusDetail"
+        >Right-click resources or loot. Left-click bots to attack.</small
+      >
     </div>
 
     <div class="abilitybar" id="abilitybar" aria-label="Ability bar"></div>
@@ -69,7 +161,12 @@
       </div>
     </div>
 
-    <div class="pickup-toasts" id="pickupToasts" aria-live="polite" aria-atomic="false"></div>
+    <div
+      class="pickup-toasts"
+      id="pickupToasts"
+      aria-live="polite"
+      aria-atomic="false"
+    ></div>
 
     <div class="build-panel" id="buildPanel" aria-hidden="true">
       <div class="inventory-head">
@@ -77,26 +174,65 @@
           <div class="panel-title">Build</div>
           <strong id="buildTitle">Wood pieces</strong>
         </div>
-        <button id="buildClose" title="Close build mode" aria-label="Close build mode">×</button>
+        <button
+          id="buildClose"
+          title="Close build mode"
+          aria-label="Close build mode"
+        >
+          ×
+        </button>
       </div>
       <div class="build-grid" id="buildPieces"></div>
       <div class="build-actions">
-        <button id="rotateBuild" title="Rotate selected piece" aria-label="Rotate selected piece">rotate</button>
-        <button id="cancelBuild" title="Cancel build mode" aria-label="Cancel build mode">cancel</button>
+        <button
+          id="rotateBuild"
+          title="Rotate selected piece"
+          aria-label="Rotate selected piece"
+        >
+          rotate
+        </button>
+        <button
+          id="cancelBuild"
+          title="Cancel build mode"
+          aria-label="Cancel build mode"
+        >
+          cancel
+        </button>
       </div>
-      <small id="buildHint">Press B to build, R to rotate, Esc to cancel.</small>
+      <small id="buildHint"
+        >Press B to build, R to rotate, Esc to cancel.</small
+      >
     </div>
 
     <div class="craft-panel" id="craftPanel" aria-hidden="true">
       <div class="inventory-head">
-        <button id="craftBack" class="craft-back" type="button" title="Back to recipes" aria-label="Back to recipes" hidden>‹</button>
+        <button
+          id="craftBack"
+          class="craft-back"
+          type="button"
+          title="Back to recipes"
+          aria-label="Back to recipes"
+          hidden
+        >
+          ‹
+        </button>
         <div>
           <div class="panel-title">Craft</div>
           <strong id="craftTitle">Recipes</strong>
         </div>
-        <button id="craftClose" title="Close crafting" aria-label="Close crafting">×</button>
+        <button
+          id="craftClose"
+          title="Close crafting"
+          aria-label="Close crafting"
+        >
+          ×
+        </button>
       </div>
-      <div class="craft-tabs" id="craftCategories" aria-label="Crafting sections"></div>
+      <div
+        class="craft-tabs"
+        id="craftCategories"
+        aria-label="Crafting sections"
+      ></div>
       <div class="craft-grid" id="craftRecipes"></div>
       <small id="craftSummary">Press C to close.</small>
     </div>
@@ -107,20 +243,47 @@
           <div class="panel-title">Inventory</div>
           <strong id="inventoryTitle">Your bag</strong>
         </div>
-        <button id="inventoryClose" title="Close inventory" aria-label="Close inventory">×</button>
+        <button
+          id="inventoryClose"
+          title="Close inventory"
+          aria-label="Close inventory"
+        >
+          ×
+        </button>
       </div>
-      <div class="equipment-grid" id="equipmentSlots" aria-label="Equipped items"></div>
+      <div
+        class="equipment-grid"
+        id="equipmentSlots"
+        aria-label="Equipped items"
+      ></div>
       <div class="bag-head">
         <div class="panel-title">Bag</div>
         <small id="bagSpace">0/20 slots</small>
       </div>
-      <div class="bag-grid" id="inventorySlots" aria-label="Inventory slots"></div>
+      <div
+        class="bag-grid"
+        id="inventorySlots"
+        aria-label="Inventory slots"
+      ></div>
       <small id="inventorySummary">Press I to close.</small>
     </div>
 
     <div class="item-popover" id="itemPopover" aria-hidden="true">
-      <div class="item-popover-card" role="dialog" aria-modal="true" aria-labelledby="itemPopoverName">
-        <button id="itemPopoverClose" class="item-popover-close" type="button" title="Close item details" aria-label="Close item details">×</button>
+      <div
+        class="item-popover-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="itemPopoverName"
+      >
+        <button
+          id="itemPopoverClose"
+          class="item-popover-close"
+          type="button"
+          title="Close item details"
+          aria-label="Close item details"
+        >
+          ×
+        </button>
         <div class="item-popover-head">
           <span id="itemPopoverIcon" class="item-icon"></span>
           <div>
@@ -137,7 +300,14 @@
           <span>Stack</span>
           <strong id="itemPopoverCount">0</strong>
         </div>
-        <button id="itemPopoverAction" class="item-popover-action" type="button" hidden>use</button>
+        <button
+          id="itemPopoverAction"
+          class="item-popover-action"
+          type="button"
+          hidden
+        >
+          use
+        </button>
       </div>
     </div>
 
@@ -151,6 +321,13 @@
       </form>
     </div>
 
-    <script src="./game.js"></script>
+    <script>
+      window.MOSSVALE_SUPABASE = {
+        url: 'https://ovgtrwnjocjvahfyyuok.supabase.co',
+        publishableKey: 'sb_publishable_tENwsCQMz1bpCgGIbtBI-A_E9idIQ0H',
+        worldId: 'main',
+      };
+    </script>
+    <script src="./game.js?v=pvp-weapons-hud-target-2"></script>
   </body>
 </html>
