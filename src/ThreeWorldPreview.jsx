@@ -7565,6 +7565,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
   const isPlayerBlockingRef = useRef(false);
   const isPlayerDeadRef = useRef(playerDead);
   const previousPlayerHealthRef = useRef(playerHealth);
+  const previousRemoteDamageRef = useRef(new Map());
   const moveTargetRef = useRef(
     new THREE.Vector3(initialPlayerPosition.x, 0, initialPlayerPosition.z),
   );
@@ -8142,6 +8143,38 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     });
   }, [playerHealth]);
 
+  useEffect(() => {
+    const seen = previousRemoteDamageRef.current;
+    const activeIds = new Set();
+
+    for (const player of remotePlayers) {
+      if (!player?.id) continue;
+      activeIds.add(player.id);
+
+      const damage = Math.max(0, Math.round(Number(player.lastDamage) || 0));
+      const damageAt = Number(player.lastDamageAt) || 0;
+      const damageKey = `${damageAt}:${damage}:${player.hp ?? ''}`;
+      if (!damage || !damageAt || seen.get(player.id) === damageKey) continue;
+
+      seen.set(player.id, damageKey);
+      const x = Number(player.x) || 0;
+      const z = Number(player.z) || 0;
+      emitCombatFloater({
+        kind: player.hp <= 0 ? 'defeat' : 'hit',
+        position: {
+          x,
+          y: buildSurfaceHeightAt(x, z, buildings),
+          z,
+        },
+        text: `-${damage}`,
+      });
+    }
+
+    for (const id of seen.keys()) {
+      if (!activeIds.has(id)) seen.delete(id);
+    }
+  }, [buildings, remotePlayers]);
+
   const damageCreature = (entry, attack) => {
     const creature = CREATURES.find((item) => item.id === entry.id);
     if (!creature) return;
@@ -8191,13 +8224,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     });
 
     if (sent) {
-      const damage = Math.max(1, Number(attack.profile.damage) || 1);
-      emitCombatFloater({
-        kind: 'hit',
-        position: entry.position,
-        text: `-${damage}`,
-      });
-      setHudActionLine(`Hit: ${attack.weapon.name} attack at ${entry.name || 'Traveler'}.`);
+      setHudActionLine(`${attack.weapon.name} swing sent at ${entry.name || 'Traveler'}.`);
       return;
     }
 
@@ -8222,6 +8249,14 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
         sendPvpWeaponAttack(hit, attack);
       }
       return;
+    }
+
+    if (attack.targetId) {
+      const target = attackableRegistryRef.current.get(attack.targetId);
+      if (target?.type === 'player') {
+        sendPvpWeaponAttack(target, attack);
+        return;
+      }
     }
 
     const missPosition = attack.origin
@@ -8321,6 +8356,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
       facing,
       impactAt: nowMs + profile.impactMs,
       target: new THREE.Vector3(x, getTerrainHeight(x, z), z),
+      targetId: options.targetId || null,
     };
 
     attackRequestRef.current = {
