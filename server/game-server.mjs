@@ -4,12 +4,16 @@ import http from "node:http";
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || "0.0.0.0";
 const WORLD = { w: 3600, h: 2600 };
+const WORLD_3D = { minX: -3600, maxX: 3600, minY: -2600, maxY: 2600 };
 const TICK_HZ = 30;
 const SNAPSHOT_HZ = 20;
 const PLAYER_BASE_SPEED = 140;
+const PLAYER_3D_BASE_SPEED = 195;
 const PLAYER_SPRINT_MULTIPLIER = 1.45;
+const PLAYER_3D_SPRINT_MULTIPLIER = 315 / 195;
 const PLAYER_RADIUS = 17;
 const ATTACK_FUDGE = 26;
+const EQUIPMENT_SLOTS = ["head", "weapon", "body", "offhand", "feet", "charm"];
 
 const weapons = new Map(
   [
@@ -116,12 +120,20 @@ function joinPlayer(socket, message) {
     closeSocket(existing.socket, { type: "replaced" });
   }
 
+  const renderer = message.renderer === "3d" ? "3d" : "2d";
+  const bounds = worldBoundsForRenderer(renderer);
+  const requestedY = renderer === "3d" ? message.z ?? message.y : message.y;
+  const equipment = safeEquipment(message.equipment, {
+    weapon: message.weaponId ?? "stick",
+    offhand: message.offhandId,
+  });
   const player = {
     socket,
     id,
+    renderer,
     name: safeText(message.name, 24) || "Traveler",
-    x: clampNumber(message.x, 42, WORLD.w - 42, WORLD.w / 2),
-    y: clampNumber(message.y, 42, WORLD.h - 42, WORLD.h / 2),
+    x: clampNumber(message.x, bounds.minX, bounds.maxX, bounds.spawnX),
+    y: clampNumber(requestedY, bounds.minY, bounds.maxY, bounds.spawnY),
     tx: null,
     ty: null,
     vx: 0,
@@ -133,7 +145,16 @@ function joinPlayer(socket, message) {
     skin: safeColor(message.skin, "#f0c59b"),
     hair: safeColor(message.hair, "#5a3929"),
     pants: safeColor(message.pants, "#516d75"),
-    weaponId: weapons.has(message.weaponId) ? message.weaponId : "stick",
+    equipment,
+    weaponId: equipment.weapon,
+    offhandId: equipment.offhand,
+    movementState: safeMovementState(message.movementState),
+    actionState: safeActionState(message.actionState),
+    actionTool: safeId(message.actionTool),
+    actionSequence: clampNumber(message.actionSequence, 0, 1000000000, 0),
+    blocking: Boolean(message.blocking || message.actionState === "block"),
+    headYaw: clampNumber(message.headYaw, -1.3, 1.3, 0),
+    headPitch: clampNumber(message.headPitch, -0.7, 0.7, 0),
     sprinting: false,
     attackReadyAt: 0,
     dazedUntil: 0,
@@ -146,19 +167,47 @@ function joinPlayer(socket, message) {
 }
 
 function handleMove(player, message) {
-  player.tx = clampNumber(message.x, 28, WORLD.w - 28, player.x);
-  player.ty = clampNumber(message.y, 28, WORLD.h - 28, player.y);
+  const bounds = worldBoundsForRenderer(player.renderer);
+  const requestedY = player.renderer === "3d" ? message.z ?? message.y : message.y;
+  player.tx = clampNumber(message.x, bounds.minX, bounds.maxX, player.x);
+  player.ty = clampNumber(requestedY, bounds.minY, bounds.maxY, player.y);
   player.sprinting = Boolean(message.sprinting);
 }
 
 function handleState(player, message) {
+  const bounds = worldBoundsForRenderer(player.renderer);
+  const requestedY = player.renderer === "3d" ? message.z ?? message.y : message.y;
   player.name = safeText(message.name, 24) || player.name;
   player.color = safeColor(message.color, player.color);
   player.skin = safeColor(message.skin, player.skin);
   player.hair = safeColor(message.hair, player.hair);
   player.pants = safeColor(message.pants, player.pants);
-  player.weaponId = weapons.has(message.weaponId) ? message.weaponId : player.weaponId;
-  player.facing = Number(message.facing) || player.facing;
+  player.equipment = safeEquipment(message.equipment, {
+    ...player.equipment,
+    weapon: message.weaponId === undefined ? player.equipment?.weapon : message.weaponId,
+    offhand: message.offhandId === undefined ? player.equipment?.offhand : message.offhandId,
+  });
+  player.weaponId = player.equipment.weapon;
+  player.offhandId = player.equipment.offhand;
+  player.movementState = safeMovementState(message.movementState);
+  player.actionState = safeActionState(message.actionState);
+  player.actionTool = safeId(message.actionTool);
+  player.actionSequence = clampNumber(message.actionSequence, 0, 1000000000, player.actionSequence || 0);
+  player.blocking = Boolean(message.blocking || player.actionState === "block");
+  player.headYaw = clampNumber(message.headYaw, -1.3, 1.3, player.headYaw || 0);
+  player.headPitch = clampNumber(message.headPitch, -0.7, 0.7, player.headPitch || 0);
+  if (player.renderer === "3d") {
+    const nextX = clampNumber(message.x, bounds.minX, bounds.maxX, player.x);
+    const nextY = clampNumber(requestedY, bounds.minY, bounds.maxY, player.y);
+    const dt = Math.max(1 / SNAPSHOT_HZ, (Date.now() - player.lastSeen) / 1000);
+    player.vx = (nextX - player.x) / dt;
+    player.vy = (nextY - player.y) / dt;
+    player.x = nextX;
+    player.y = nextY;
+    player.tx = null;
+    player.ty = null;
+  }
+  player.facing = finiteNumber(message.facing, player.facing);
   player.maxHp = clampNumber(message.maxHp, 1, 40, player.maxHp);
 }
 
@@ -167,12 +216,15 @@ function handleAttack(attacker, message) {
   if (attacker.dazedUntil > at || attacker.attackReadyAt > at) return;
 
   const weapon = weapons.get(message.weaponId) || weapons.get(attacker.weaponId) || weapons.get("stick");
+  const clientFacing = finiteNumber(message.facing, attacker.facing);
+  const hitFacing = attackFacingForPlayer(attacker, clientFacing);
   attacker.weaponId = weapon.id;
-  attacker.facing = Number(message.facing) || attacker.facing;
+  attacker.facing = clientFacing;
   attacker.attackReadyAt = at + weapon.cooldown * 1000;
 
-  const targetX = clampNumber(message.targetX, 0, WORLD.w, attacker.x + Math.cos(attacker.facing) * weapon.range);
-  const targetY = clampNumber(message.targetY, 0, WORLD.h, attacker.y + Math.sin(attacker.facing) * weapon.range);
+  const bounds = worldBoundsForRenderer(attacker.renderer);
+  const targetX = clampNumber(message.targetX, bounds.minX, bounds.maxX, attacker.x + Math.cos(hitFacing) * weapon.range);
+  const targetY = clampNumber(message.targetY, bounds.minY, bounds.maxY, attacker.y + Math.sin(hitFacing) * weapon.range);
   const attack = {
     type: "pvp-attack",
     id: attacker.id,
@@ -187,7 +239,7 @@ function handleAttack(attacker, message) {
   };
   broadcast(attack);
 
-  const target = findAttackHit(attacker, weapon, attack);
+  const target = findAttackHit(attacker, weapon, attack, hitFacing);
   if (!target) return;
 
   target.hp = Math.max(0, target.hp - weapon.damage);
@@ -213,7 +265,7 @@ function handleAttack(attacker, message) {
   });
 }
 
-function findAttackHit(attacker, weapon, attack) {
+function findAttackHit(attacker, weapon, attack, hitFacing = attack.facing) {
   const candidates = attack.targetId ? [players.get(attack.targetId)].filter(Boolean) : [...players.values()];
   let best = null;
   let bestDistance = Infinity;
@@ -224,7 +276,7 @@ function findAttackHit(attacker, weapon, attack) {
     let distance = dist(attacker.x, attacker.y, target.x, target.y);
     if (weapon.type === "melee") {
       const angle = Math.atan2(target.y - attacker.y, target.x - attacker.x);
-      hit = distance <= weapon.range + PLAYER_RADIUS + ATTACK_FUDGE && Math.abs(angleDelta(attacker.facing, angle)) <= 1.05;
+      hit = distance <= weapon.range + PLAYER_RADIUS + ATTACK_FUDGE && Math.abs(angleDelta(hitFacing, angle)) <= 1.05;
     } else {
       distance = pointSegmentDistance(target.x, target.y, attacker.x, attacker.y, attack.targetX, attack.targetY);
       hit =
@@ -237,6 +289,15 @@ function findAttackHit(attacker, weapon, attack) {
     }
   }
   return best;
+}
+
+function finiteNumber(value, fallback = 0) {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+}
+
+function attackFacingForPlayer(player, facing) {
+  return player.renderer === "3d" ? Math.atan2(Math.cos(facing), Math.sin(facing)) : facing;
 }
 
 function tickWorld() {
@@ -255,6 +316,11 @@ function tickWorld() {
 }
 
 function updatePlayerMovement(player, dt) {
+  if (player.renderer === "3d") {
+    player.vx *= 0.82;
+    player.vy *= 0.82;
+    return;
+  }
   if (player.tx == null || player.ty == null) {
     player.vx *= 0.82;
     player.vy *= 0.82;
@@ -272,10 +338,13 @@ function updatePlayerMovement(player, dt) {
     return;
   }
 
-  const speed = PLAYER_BASE_SPEED * (player.sprinting ? PLAYER_SPRINT_MULTIPLIER : 1);
+  const speed = player.renderer === "3d"
+    ? PLAYER_3D_BASE_SPEED * (player.sprinting ? PLAYER_3D_SPRINT_MULTIPLIER : 1)
+    : PLAYER_BASE_SPEED * (player.sprinting ? PLAYER_SPRINT_MULTIPLIER : 1);
+  const bounds = worldBoundsForRenderer(player.renderer);
   const step = Math.min(d, speed * dt);
-  player.x = clamp(player.x + (dx / d) * step, 42, WORLD.w - 42);
-  player.y = clamp(player.y + (dy / d) * step, 42, WORLD.h - 42);
+  player.x = clamp(player.x + (dx / d) * step, bounds.minX, bounds.maxX);
+  player.y = clamp(player.y + (dy / d) * step, bounds.minY, bounds.maxY);
   player.vx = (dx / d) * speed;
   player.vy = (dy / d) * speed;
   player.facing = Math.atan2(dy, dx);
@@ -291,6 +360,7 @@ function broadcastSnapshot() {
       name: player.name,
       x: player.x,
       y: player.y,
+      z: player.renderer === "3d" ? player.y : undefined,
       tx: player.tx,
       ty: player.ty,
       vx: player.vx,
@@ -302,7 +372,17 @@ function broadcastSnapshot() {
       facing: player.facing,
       hp: player.hp,
       maxHp: player.maxHp,
+      equipment: player.equipment,
       weaponId: player.weaponId,
+      offhandId: player.offhandId,
+      movementState: player.movementState,
+      actionState: player.actionState,
+      actionTool: player.actionTool,
+      actionSequence: player.actionSequence || 0,
+      blocking: Boolean(player.blocking || player.actionState === "block"),
+      headYaw: player.headYaw || 0,
+      headPitch: player.headPitch || 0,
+      renderer: player.renderer,
       dazedMs: Math.max(0, player.dazedUntil - at),
       sentAt: at,
     })),
@@ -408,8 +488,50 @@ function safeId(value) {
   return typeof value === "string" && /^[a-zA-Z0-9_-]{1,80}$/.test(value) ? value : null;
 }
 
+function safeEquipment(source = {}, fallback = {}) {
+  return Object.fromEntries(
+    EQUIPMENT_SLOTS.map((slot) => {
+      const hasSourceSlot = Object.prototype.hasOwnProperty.call(source || {}, slot);
+      const raw = hasSourceSlot ? source?.[slot] : fallback?.[slot] ?? null;
+      const id = safeId(raw);
+      if (slot === "weapon") return [slot, id && weapons.has(id) ? id : null];
+      return [slot, id];
+    }),
+  );
+}
+
+function safeMovementState(value) {
+  return ["idle", "walking", "running"].includes(value) ? value : "idle";
+}
+
+function safeActionState(value) {
+  return ["idle", "attack", "gather", "block"].includes(value) ? value : "idle";
+}
+
 function safeText(value, max) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+function worldBoundsForRenderer(renderer) {
+  if (renderer === "3d") {
+    return {
+      minX: WORLD_3D.minX + 60,
+      maxX: WORLD_3D.maxX - 60,
+      minY: WORLD_3D.minY + 60,
+      maxY: WORLD_3D.maxY - 60,
+      spawnX: 72,
+      spawnY: 0,
+    };
+  }
+
+  return {
+    minX: 42,
+    maxX: WORLD.w - 42,
+    minY: 42,
+    maxY: WORLD.h - 42,
+    spawnX: WORLD.w / 2,
+    spawnY: WORLD.h / 2,
+  };
 }
 
 function safeColor(value, fallback) {

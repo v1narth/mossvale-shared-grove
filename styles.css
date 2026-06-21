@@ -5,6 +5,7 @@
     sans-serif;
   background: #102019;
   color: #f2f5e8;
+  --cursor-game: auto;
 }
 
 * {
@@ -12,7 +13,8 @@
 }
 
 html,
-body {
+body,
+#react-root {
   width: 100%;
   height: 100%;
   margin: 0;
@@ -22,14 +24,251 @@ body {
 body {
   touch-action: none;
   user-select: none;
+  cursor: var(--cursor-game);
 }
 
 canvas {
   display: block;
   width: 100vw;
   height: 100vh;
-  cursor: default;
-  background: #7aa56e;
+}
+
+#react-root {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.hud,
+.abilitybar,
+.quickbar,
+.inventory-panel,
+.craft-panel,
+.build-panel,
+.item-popover,
+.name-modal {
+  pointer-events: auto;
+}
+
+.three-world-preview {
+  position: fixed;
+  inset: 0;
+  pointer-events: auto;
+}
+
+.three-world-preview canvas {
+  background: #86b779;
+  cursor: var(--cursor-game);
+}
+
+.render-settings {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 45;
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.render-settings-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fps-counter {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 82px;
+  padding: 8px 10px;
+  color: rgba(250, 255, 242, 0.94);
+  background: rgba(22, 31, 27, 0.72);
+  border: 1px solid rgba(235, 250, 218, 0.16);
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(8, 16, 12, 0.24);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  pointer-events: none;
+}
+
+.fps-counter span {
+  font: 900 18px/1 Inter, system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.fps-counter small {
+  color: rgba(250, 255, 242, 0.72);
+  font: 800 10px/1 Inter, system-ui, sans-serif;
+}
+
+.render-settings-toggle {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  color: rgba(250, 255, 242, 0.9);
+  background: rgba(22, 31, 27, 0.72);
+  border: 1px solid rgba(235, 250, 218, 0.16);
+  border-radius: 8px;
+  box-shadow: 0 14px 34px rgba(8, 16, 12, 0.24);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  font: 800 12px/1 Inter, system-ui, sans-serif;
+  cursor: var(--cursor-game);
+}
+
+.render-settings-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+}
+
+.render-settings-toggle[aria-expanded="true"],
+.render-settings-toggle:hover {
+  color: #172218;
+  background: #d9ffb8;
+}
+
+.render-settings-panel {
+  display: grid;
+  gap: 10px;
+  width: min(330px, calc(100vw - 36px));
+  padding: 12px;
+  color: rgba(250, 255, 242, 0.94);
+  background: rgba(22, 31, 27, 0.78);
+  border: 1px solid rgba(235, 250, 218, 0.16);
+  border-radius: 8px;
+  box-shadow: 0 18px 42px rgba(8, 16, 12, 0.28);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.resource-node-label {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  min-width: 62px;
+  color: #f8ffec;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  text-align: center;
+  text-shadow: 0 2px 4px rgba(10, 16, 12, 0.74);
+  pointer-events: none;
+}
+
+.resource-node-label strong {
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.resource-node-label span {
+  min-width: 56px;
+  padding: 5px 9px;
+  color: #f8ffec;
+  background: rgba(31, 27, 40, 0.64);
+  border: 1px solid rgba(248, 255, 236, 0.16);
+  border-radius: 5px;
+  box-shadow:
+    0 8px 20px rgba(8, 17, 13, 0.26),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.12);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.resource-node-label.wood span {
+  background:
+    linear-gradient(90deg, rgba(210, 170, 105, 0.34), rgba(31, 27, 40, 0.64) 58%),
+    rgba(31, 27, 40, 0.64);
+}
+
+.resource-node-label.stone span {
+  background:
+    linear-gradient(90deg, rgba(227, 229, 219, 0.28), rgba(31, 27, 40, 0.64) 58%),
+    rgba(31, 27, 40, 0.64);
+}
+
+.settings-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+  padding: 4px;
+  background: rgba(3, 7, 5, 0.18);
+  border-radius: 7px;
+}
+
+.settings-presets button {
+  height: 30px;
+  color: rgba(250, 255, 242, 0.78);
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  font: 800 11px/1 Inter, system-ui, sans-serif;
+  cursor: var(--cursor-game);
+}
+
+.settings-presets button:hover {
+  color: #172218;
+  background: #d9ffb8;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  color: rgba(250, 255, 242, 0.84);
+  font: 800 11px/1 Inter, system-ui, sans-serif;
+}
+
+.settings-row select {
+  grid-column: span 2;
+  height: 30px;
+  padding: 0 8px;
+  color: rgba(250, 255, 242, 0.94);
+  background: rgba(250, 255, 242, 0.08);
+  border: 1px solid rgba(235, 250, 218, 0.14);
+  border-radius: 6px;
+  font: 800 11px/1 Inter, system-ui, sans-serif;
+}
+
+.settings-row input[type="range"] {
+  width: 100%;
+  accent-color: #d9ffb8;
+}
+
+.settings-row input[type="range"]:disabled {
+  opacity: 0.45;
+}
+
+.settings-row output {
+  color: rgba(250, 255, 242, 0.88);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.settings-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: rgba(250, 255, 242, 0.84);
+  font: 800 11px/1 Inter, system-ui, sans-serif;
+}
+
+.settings-check input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: #d9ffb8;
 }
 
 .loading-screen {
@@ -77,11 +316,32 @@ canvas {
   font-weight: 850;
 }
 
-.loading-screen span {
+.loading-screen > span {
   max-width: min(300px, calc(100vw - 48px));
   color: rgba(248, 255, 236, 0.72);
   font-size: 13px;
   line-height: 1.4;
+}
+
+.loading-progress {
+  width: min(320px, calc(100vw - 48px));
+  height: 10px;
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(248, 255, 236, 0.18);
+  border-radius: 999px;
+  background: rgba(248, 255, 236, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18);
+}
+
+.loading-progress span {
+  display: block;
+  width: 0;
+  max-width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #a7df83, #f0cf7a, #9fd6ff);
+  transition: width 260ms ease;
 }
 
 @keyframes loading-spin {
@@ -109,15 +369,6 @@ canvas {
   border-radius: 8px;
 }
 
-.top-right {
-  top: 18px;
-  right: 18px;
-  display: flex;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 8px;
-}
-
 .target-hud {
   top: 18px;
   left: 50%;
@@ -134,14 +385,6 @@ canvas {
 
 .target-hud[hidden] {
   display: none;
-}
-
-.bottom-left {
-  left: 18px;
-  bottom: 146px;
-  width: min(390px, calc(100vw - 36px));
-  padding: 12px;
-  border-radius: 8px;
 }
 
 .bottom-right {
@@ -208,7 +451,8 @@ canvas {
   display: none;
 }
 
-.gather-hud .item-icon {
+.gather-hud .item-icon,
+.gather-hud .item-art {
   width: 66px;
   height: 66px;
   border-radius: 8px;
@@ -292,7 +536,8 @@ canvas {
   animation: pickupToastOut 360ms ease-in both;
 }
 
-.pickup-toast .item-icon {
+.pickup-toast .item-icon,
+.pickup-toast .item-art {
   width: 38px;
   height: 38px;
 }
@@ -333,6 +578,61 @@ canvas {
   text-overflow: ellipsis;
 }
 
+@keyframes combatFloaterRise {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  70% {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-58px) scale(1.03);
+  }
+}
+
+.combat-floater {
+  min-width: 58px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 246, 189, 0.48);
+  border-radius: 999px;
+  background: rgba(18, 27, 23, 0.9);
+  box-shadow:
+    0 0 0 1px rgba(255, 246, 189, 0.12),
+    0 16px 34px rgba(0, 0, 0, 0.38);
+  color: #fff0a6;
+  font: 950 24px/0.95 Inter, system-ui, sans-serif;
+  text-align: center;
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.48),
+    0 0 14px rgba(255, 226, 123, 0.22);
+  white-space: nowrap;
+  pointer-events: none;
+  animation: combatFloaterRise 1800ms ease-out both;
+}
+
+.combat-floater.is-miss {
+  border-color: rgba(229, 241, 217, 0.28);
+  color: rgba(229, 241, 217, 0.9);
+}
+
+.combat-floater.is-defeat {
+  border-color: rgba(255, 176, 110, 0.48);
+  color: #ffcf9c;
+}
+
+.combat-floater.is-taken {
+  border-color: rgba(255, 81, 81, 0.68);
+  background: rgba(43, 14, 17, 0.94);
+  color: #ff5a5a;
+  text-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.58),
+    0 0 16px rgba(255, 65, 65, 0.28);
+}
+
 @keyframes pickupToastIn {
   from {
     opacity: 0;
@@ -362,7 +662,7 @@ canvas {
   border-radius: 8px;
   background: rgba(245, 252, 229, 0.08);
   color: rgba(252, 255, 240, 0.94);
-  cursor: pointer;
+  cursor: var(--cursor-game);
   transition:
     background 160ms ease,
     border-color 160ms ease,
@@ -376,7 +676,7 @@ canvas {
 
 .quick-slot[draggable="true"],
 .bag-slot[draggable="true"] {
-  cursor: grab;
+  cursor: var(--cursor-game);
 }
 
 .quick-slot.is-dragging,
@@ -624,7 +924,7 @@ canvas {
   border-radius: 7px;
   background: rgba(245, 252, 229, 0.1);
   color: rgba(250, 255, 241, 0.9);
-  cursor: pointer;
+  cursor: var(--cursor-game);
   font-size: 18px;
   line-height: 1;
 }
@@ -661,7 +961,7 @@ canvas {
   border-radius: 7px;
   background: rgba(245, 252, 229, 0.08);
   color: rgba(229, 241, 217, 0.66);
-  cursor: pointer;
+  cursor: var(--cursor-game);
   font-size: 10px;
   font-weight: 800;
   line-height: 1;
@@ -686,12 +986,12 @@ canvas {
   border-radius: 8px;
   background: rgba(245, 252, 229, 0.08);
   color: rgba(252, 255, 240, 0.94);
-  cursor: pointer;
+  cursor: var(--cursor-game);
   text-align: left;
 }
 
 .craft-recipe:disabled {
-  cursor: not-allowed;
+  cursor: var(--cursor-game);
   opacity: 0.52;
 }
 
@@ -791,7 +1091,8 @@ canvas {
   background: rgba(245, 252, 229, 0.08);
 }
 
-.craft-detail-icon .item-icon.craft-detail-item {
+.craft-detail-icon .item-icon.craft-detail-item,
+.craft-detail-icon .item-art.craft-detail-item {
   width: 62px;
   height: 62px;
   border-radius: 8px;
@@ -870,7 +1171,7 @@ canvas {
   border-radius: 7px;
   background: rgba(255, 226, 123, 0.22);
   color: rgba(255, 246, 189, 0.96);
-  cursor: pointer;
+  cursor: var(--cursor-game);
   font-size: 12px;
   font-weight: 900;
 }
@@ -878,7 +1179,7 @@ canvas {
 .craft-detail-action:disabled {
   background: rgba(245, 252, 229, 0.1);
   color: rgba(229, 241, 217, 0.52);
-  cursor: default;
+  cursor: var(--cursor-game);
 }
 
 .build-piece {
@@ -889,13 +1190,13 @@ canvas {
   border-radius: 8px;
   background: rgba(245, 252, 229, 0.08);
   color: rgba(252, 255, 240, 0.94);
-  cursor: pointer;
+  cursor: var(--cursor-game);
   text-align: left;
   padding: 8px 30px 8px 8px;
 }
 
 .build-piece:disabled {
-  cursor: not-allowed;
+  cursor: var(--cursor-game);
 }
 
 .build-piece.is-active {
@@ -938,7 +1239,7 @@ canvas {
   border-radius: 7px;
   background: rgba(245, 252, 229, 0.1);
   color: rgba(250, 255, 241, 0.88);
-  cursor: pointer;
+  cursor: var(--cursor-game);
   font-size: 11px;
   padding: 8px 9px;
 }
@@ -1019,7 +1320,7 @@ canvas {
 .equipment-slot.is-filled {
   border-color: rgba(255, 226, 123, 0.46);
   background: rgba(255, 226, 123, 0.12);
-  cursor: pointer;
+  cursor: var(--cursor-game);
 }
 
 .equipment-slot.is-filled:hover,
@@ -1115,6 +1416,27 @@ canvas {
   transform: rotate(43deg);
 }
 
+.weapon-dagger::before {
+  top: 7px;
+  left: 14px;
+  width: 4px;
+  height: 15px;
+  border-radius: 4px 4px 2px 2px;
+  background: linear-gradient(90deg, #edf2df, #aeb9aa);
+  box-shadow: 0 -2px 0 #f9fbe8;
+  transform: rotate(43deg);
+}
+
+.weapon-dagger::after {
+  top: 18px;
+  left: 10px;
+  width: 11px;
+  height: 4px;
+  border-radius: 5px;
+  background: #78604b;
+  transform: rotate(43deg);
+}
+
 .weapon-stick::before {
   top: 5px;
   left: 14px;
@@ -1155,6 +1477,50 @@ canvas {
   background: rgba(248, 248, 222, 0.9);
   box-shadow: -5px 9px 0 -1px #e8ead6;
   transform: rotate(-18deg);
+}
+
+.weapon-crossbow::before {
+  top: 9px;
+  left: 5px;
+  width: 20px;
+  height: 11px;
+  border-radius: 5px 5px 4px 4px;
+  background: linear-gradient(90deg, #7b5638, #d6ccb8 52%, #5b4236);
+  transform: rotate(-18deg);
+}
+
+.weapon-crossbow::after {
+  top: 5px;
+  left: 8px;
+  width: 15px;
+  height: 15px;
+  border-top: 3px solid #d7a45c;
+  border-right: 3px solid #d7a45c;
+  border-radius: 4px;
+  transform: rotate(27deg);
+}
+
+.weapon-battle_axe::before,
+.weapon-great_axe::before {
+  top: 5px;
+  left: 7px;
+  width: 17px;
+  height: 11px;
+  border-radius: 9px 4px 9px 4px;
+  background: linear-gradient(180deg, #eef1df, #a7aca5);
+  box-shadow: inset 0 -2px 0 rgba(35, 45, 40, 0.18);
+  transform: rotate(-32deg);
+}
+
+.weapon-battle_axe::after,
+.weapon-great_axe::after {
+  top: 10px;
+  left: 15px;
+  width: 5px;
+  height: 20px;
+  border-radius: 4px;
+  background: #8b6546;
+  transform: rotate(-32deg);
 }
 
 .weapon-pistol::before {
@@ -1265,6 +1631,29 @@ canvas {
     conic-gradient(from 0deg, transparent 0 10%, var(--item-color) 10% 22%, transparent 22% 35%, var(--item-color) 35% 47%, transparent 47% 60%, var(--item-color) 60% 72%, transparent 72% 85%, var(--item-color) 85% 96%, transparent 96%);
 }
 
+.weapon-staff::before {
+  top: 4px;
+  left: 14px;
+  width: 4px;
+  height: 23px;
+  border-radius: 4px;
+  background: #8b6546;
+  box-shadow: 0 0 0 1px rgba(255, 245, 210, 0.18);
+  transform: rotate(34deg);
+}
+
+.weapon-staff::after {
+  top: 3px;
+  left: 8px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, #fff7b4 0 30%, transparent 31%),
+    conic-gradient(from 0deg, var(--item-color), transparent 18%, var(--item-color) 36%, transparent 54%, var(--item-color) 72%, transparent 88%, var(--item-color));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--item-color) 62%, transparent);
+}
+
 .weapon-hammer::before {
   top: 5px;
   left: 7px;
@@ -1286,7 +1675,8 @@ canvas {
   transform: rotate(-28deg);
 }
 
-.quick-slot .weapon-prop.slot-icon {
+.quick-slot .weapon-prop.slot-icon,
+.quick-slot .item-art.slot-icon {
   width: 28px;
   height: 28px;
 }
@@ -1353,7 +1743,7 @@ canvas {
 .bag-slot.is-filled {
   display: grid;
   padding: 5px;
-  cursor: pointer;
+  cursor: var(--cursor-game);
   place-items: center;
 }
 
@@ -1414,7 +1804,7 @@ canvas {
   border-radius: 7px;
   background: rgba(245, 252, 229, 0.1);
   color: rgba(250, 255, 241, 0.9);
-  cursor: pointer;
+  cursor: var(--cursor-game);
   font-size: 17px;
   line-height: 1;
 }
@@ -1470,7 +1860,7 @@ canvas {
   border-radius: 7px;
   background: rgba(255, 226, 123, 0.18);
   color: rgba(255, 246, 189, 0.95);
-  cursor: pointer;
+  cursor: var(--cursor-game);
   font-size: 11px;
   font-weight: 800;
   padding: 8px 9px;
@@ -1485,7 +1875,7 @@ canvas {
 .item-popover-action:disabled {
   background: rgba(245, 252, 229, 0.1);
   color: rgba(229, 241, 217, 0.5);
-  cursor: default;
+  cursor: var(--cursor-game);
 }
 
 #inventorySummary {
@@ -1498,6 +1888,31 @@ canvas {
   border-radius: 8px;
   box-shadow: inset 0 -4px 8px rgba(0, 0, 0, 0.14);
   flex: 0 0 auto;
+}
+
+.item-art {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background:
+    radial-gradient(circle at 34% 24%, rgba(255, 255, 230, 0.16), transparent 38%),
+    rgba(245, 252, 229, 0.055);
+  box-shadow:
+    inset 0 -4px 8px rgba(0, 0, 0, 0.16),
+    0 3px 8px rgba(0, 0, 0, 0.12);
+  flex: 0 0 auto;
+}
+
+.item-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.28));
 }
 
 .wood .item-icon,
@@ -1540,6 +1955,48 @@ canvas {
     linear-gradient(35deg, transparent 0 37%, #f8f1da 38% 62%, transparent 63%),
     linear-gradient(-35deg, transparent 0 38%, #e8d9b4 39% 61%, transparent 62%),
     #b76e64;
+}
+
+.torch .item-icon,
+.item-icon.torch {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 51% 20%, rgba(255, 245, 166, 0.95) 0 11%, rgba(255, 161, 59, 0.72) 12% 23%, transparent 24%),
+    linear-gradient(52deg, transparent 0 43%, #8d5b32 44% 56%, transparent 57%),
+    #4e6545;
+  box-shadow:
+    inset 0 -4px 8px rgba(0, 0, 0, 0.14),
+    0 0 12px rgba(255, 177, 75, 0.34);
+}
+
+.torch .item-icon::before,
+.item-icon.torch::before {
+  position: absolute;
+  top: 5px;
+  left: 15px;
+  width: 4px;
+  height: 21px;
+  border-radius: 4px;
+  background: linear-gradient(180deg, #3b2b22 0 24%, #a66d3b 25% 100%);
+  content: "";
+  transform: rotate(35deg);
+}
+
+.torch .item-icon::after,
+.item-icon.torch::after {
+  position: absolute;
+  top: 2px;
+  left: 10px;
+  width: 11px;
+  height: 14px;
+  border-radius: 50% 50% 46% 46%;
+  background:
+    radial-gradient(circle at 50% 70%, #fff6a6 0 26%, transparent 27%),
+    linear-gradient(180deg, #ffcc62, #ff7e35);
+  box-shadow: 0 0 8px rgba(255, 177, 75, 0.72);
+  content: "";
+  transform: rotate(14deg);
 }
 
 .wood-block .item-icon,
@@ -1788,30 +2245,6 @@ button {
   color: inherit;
 }
 
-.icon-button {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: rgba(245, 252, 229, 0.1);
-  color: rgba(250, 255, 241, 0.92);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  transition:
-    transform 160ms ease,
-    background 160ms ease;
-}
-
-.icon-button:hover {
-  background: rgba(245, 252, 229, 0.18);
-  transform: translateY(-1px);
-}
-
-.icon-button.is-active {
-  background: rgba(255, 226, 123, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(255, 226, 123, 0.32);
-}
-
 .tiny-row {
   display: flex;
   align-items: center;
@@ -1836,7 +2269,7 @@ button {
   color: rgba(249, 255, 235, 0.88);
   padding: 6px 9px;
   font-size: 11px;
-  cursor: pointer;
+  cursor: var(--cursor-game);
 }
 
 .status-row {
@@ -1895,31 +2328,6 @@ button {
 
 .target-health .health-shell {
   height: 8px;
-}
-
-.action-line {
-  min-height: 32px;
-  color: rgba(239, 246, 228, 0.76);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.progress-shell {
-  overflow: hidden;
-  height: 7px;
-  margin-top: 10px;
-  border-radius: 999px;
-  background: rgba(235, 246, 219, 0.1);
-}
-
-.progress-shell span {
-  display: block;
-  width: 0%;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #f6d66d, #c5f08d);
-  box-shadow: 0 0 18px rgba(217, 246, 141, 0.38);
-  transition: width 100ms linear;
 }
 
 .panel-title {
@@ -1985,9 +2393,21 @@ button {
 }
 
 @media (max-width: 720px) {
+  .render-settings {
+    top: 10px;
+    right: 10px;
+  }
+
+  .render-settings-panel {
+    width: min(312px, calc(100vw - 20px));
+    padding: 10px;
+  }
+
+  .settings-row {
+    grid-template-columns: 86px minmax(0, 1fr) 32px;
+  }
+
   .top-left,
-  .top-right,
-  .bottom-left,
   .bottom-right {
     left: 10px;
     right: auto;
@@ -2012,11 +2432,6 @@ button {
     width: calc(100vw - 20px);
   }
 
-  .top-right {
-    top: auto;
-    bottom: 162px;
-  }
-
   .inventory-panel,
   .craft-panel {
     top: 76px;
@@ -2035,10 +2450,6 @@ button {
 
   .build-grid {
     grid-template-columns: repeat(2, 1fr);
-  }
-
-  .bottom-left {
-    bottom: 132px;
   }
 
   .bottom-right {
@@ -2067,13 +2478,14 @@ button {
   }
 
   .gather-hud {
-    bottom: 120px;
+    bottom: 156px;
     grid-template-columns: 50px minmax(0, 1fr);
     gap: 7px;
     width: calc(100vw - 20px);
   }
 
-  .gather-hud .item-icon {
+  .gather-hud .item-icon,
+  .gather-hud .item-art {
     width: 50px;
     height: 50px;
   }
@@ -2095,7 +2507,8 @@ button {
     padding: 8px;
   }
 
-  .pickup-toast .item-icon {
+  .pickup-toast .item-icon,
+  .pickup-toast .item-art {
     width: 32px;
     height: 32px;
   }

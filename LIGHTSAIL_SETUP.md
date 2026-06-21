@@ -105,17 +105,14 @@ aws lightsail get-container-services \
   --output text
 ```
 
-Use that URL as a WebSocket URL in `index.html` by changing `https://` to `wss://`:
+Use that URL as the GitHub Actions repository variable
+`MOSSVALE_GAME_SERVER_URL`, changing `https://` to `wss://`:
 
-```html
-<script>
-  window.MOSSVALE_GAME_SERVER = {
-    url: "wss://mossvale-game.example.eu-central-1.cs.amazonlightsail.com",
-  };
-</script>
+```txt
+wss://mossvale-game.example.eu-central-1.cs.amazonlightsail.com
 ```
 
-Then bump the `game.js` cache key, commit, push GitHub Pages, and verify:
+Then deploy GitHub Pages from Actions and verify:
 
 ```sh
 curl https://YOUR_LIGHTSAIL_DOMAIN/

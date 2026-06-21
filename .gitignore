@@ -2,5 +2,10 @@ node_modules/
 .bin/
 dist/
 .vite/
+.env
+.playwright-cli/
+.playwright-mcp/
+output/
+test-results/
 .DS_Store
 supabase/.temp/
