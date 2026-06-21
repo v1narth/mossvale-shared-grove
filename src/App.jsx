@@ -152,6 +152,7 @@ export default function App() {
       originX,
       originY,
       originZ,
+      observedAt,
       facing = 0,
     } = {}) =>
       sendGameServerMessage("attack", {
@@ -161,6 +162,7 @@ export default function App() {
         targetY: targetY ?? targetZ ?? 0,
         originX,
         originY: originY ?? originZ,
+        observedAt,
         facing,
       });
     const ownPlayerIds = () =>

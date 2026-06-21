@@ -5687,6 +5687,7 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
       vx: 0,
       vz: 0,
       receivedAt: currentFrameTime(),
+      sentAt: Number(player.sentAt) || Date.now(),
     },
   ]);
   const renderTargetRef = useRef(
@@ -5721,6 +5722,7 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
     radius: 36,
     hp: player.hp ?? player.maxHp ?? 5,
     maxHp: player.maxHp ?? 5,
+    observedAt: Number(player.sentAt) || Date.now(),
     position: new THREE.Vector3(player.x, 0, player.z),
   });
 
@@ -5747,6 +5749,7 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
     const x = Number(player.x) || 0;
     const z = Number(player.z) || 0;
     const facing = Number(player.facing) || 0;
+    const sentAt = Number(player.sentAt) || Date.now();
     const movedSq = (x - last.x) ** 2 + (z - last.z) ** 2;
     const turned = Math.abs(shortestAngleDelta(facing, last.facing));
 
@@ -5760,11 +5763,14 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
         (z - last.z) / dt,
         REMOTE_PLAYER_MAX_PREDICT_SPEED,
       );
-      history.push({ x, z, facing, ...velocity, receivedAt });
+      history.push({ x, z, facing, ...velocity, receivedAt, sentAt });
       if (history.length > 10) history.splice(0, history.length - 10);
-    } else if (player.movementState === 'idle') {
-      last.vx = 0;
-      last.vz = 0;
+    } else {
+      last.sentAt = sentAt;
+      if (player.movementState === 'idle') {
+        last.vx = 0;
+        last.vz = 0;
+      }
     }
 
     headLookOverrideRef.current = {
@@ -5783,6 +5789,7 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
     player.maxHp,
     player.name,
     player.movementState,
+    player.sentAt,
     player.x,
     player.z,
   ]);
@@ -5861,6 +5868,7 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
     let targetZ = previous.z;
     let targetFacing = previous.facing;
     let targetSpeed = Math.hypot(previous.vx || 0, previous.vz || 0);
+    let targetObservedAt = previous.sentAt || Date.now();
 
     if (next) {
       const span = Math.max(1, next.receivedAt - previous.receivedAt);
@@ -5874,6 +5882,11 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
       targetFacing =
         previous.facing + shortestAngleDelta(next.facing, previous.facing) * amount;
       targetSpeed = Math.hypot(next.vx || 0, next.vz || 0);
+      targetObservedAt = THREE.MathUtils.lerp(
+        previous.sentAt || targetObservedAt,
+        next.sentAt || targetObservedAt,
+        amount,
+      );
     } else {
       const extrapolateSeconds =
         Math.min(
@@ -5882,6 +5895,7 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
         ) / 1000;
       targetX += (previous.vx || 0) * extrapolateSeconds;
       targetZ += (previous.vz || 0) * extrapolateSeconds;
+      targetObservedAt += extrapolateSeconds * 1000;
     }
 
     const target = renderTargetRef.current;
@@ -5909,6 +5923,7 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
     isMovingRef.current = movingByState || targetSpeed > 12 || distanceSq > 8 * 8;
     isRunningRef.current = player.movementState === 'running';
     attackableEntryRef.current.position.copy(root.position);
+    attackableEntryRef.current.observedAt = targetObservedAt;
   });
 
   const handlePointerDown = (event) => {
@@ -8222,6 +8237,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
       targetZ: entry.position.z,
       originX: attack.origin.x,
       originZ: attack.origin.z,
+      observedAt: entry.observedAt,
       facing: attack.facing,
     });
 

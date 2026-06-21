@@ -13,8 +13,9 @@ const PLAYER_SPRINT_MULTIPLIER = 1.45;
 const PLAYER_3D_SPRINT_MULTIPLIER = 315 / 195;
 const PLAYER_RADIUS = 17;
 const ATTACK_FUDGE = 26;
-const ATTACK_OBSERVED_TARGET_FUDGE = 150;
 const ATTACK_OBSERVED_ORIGIN_FUDGE = 130;
+const POSITION_HISTORY_MS = 1200;
+const ATTACK_MAX_REWIND_MS = 650;
 const EQUIPMENT_SLOTS = ["head", "weapon", "body", "offhand", "feet", "charm"];
 
 const weapons = new Map(
@@ -166,9 +167,11 @@ function joinPlayer(socket, message) {
     attackReadyAt: 0,
     dazedUntil: 0,
     lastSeen: Date.now(),
+    positionHistory: [],
   };
 
   players.set(id, player);
+  recordPlayerPosition(player, Date.now());
   send(socket, { type: "welcome", id, tickHz: TICK_HZ, snapshotHz: SNAPSHOT_HZ });
   broadcast({ type: "server-event", event: "join", id, name: player.name }, socket);
 }
@@ -238,6 +241,13 @@ function handleAttack(attacker, message) {
     originX != null &&
     originY != null &&
     dist(attacker.x, attacker.y, originX, originY) <= ATTACK_OBSERVED_ORIGIN_FUDGE;
+  const observedAt = Number(message.observedAt ?? message.targetObservedAt);
+  const targetObservedAt =
+    Number.isFinite(observedAt) &&
+    observedAt <= at + 100 &&
+    at - observedAt <= ATTACK_MAX_REWIND_MS
+      ? observedAt
+      : null;
   const attack = {
     type: "pvp-attack",
     id: attacker.id,
@@ -249,6 +259,7 @@ function handleAttack(attacker, message) {
     facing: attacker.facing,
     swingMs: weapon.type === "melee" ? 260 : 150,
     targetId: safeId(message.targetId),
+    targetObservedAt,
     targetX,
     targetY,
   };
@@ -290,11 +301,12 @@ function findAttackHit(attacker, weapon, attack, hitFacing = attack.facing) {
   for (const target of candidates) {
     if (target.id === attacker.id || target.hp <= 0) continue;
     const positions = [{ x: target.x, y: target.y }];
-    if (
-      attack.targetId === target.id &&
-      dist(target.x, target.y, attack.targetX, attack.targetY) <= ATTACK_OBSERVED_TARGET_FUDGE
-    ) {
-      positions.push({ x: attack.targetX, y: attack.targetY });
+    const rewoundTarget =
+      attack.targetId === target.id && attack.targetObservedAt
+        ? historicalPlayerPosition(target, attack.targetObservedAt)
+        : null;
+    if (rewoundTarget) {
+      positions.push(rewoundTarget);
     }
 
     let hit = false;
@@ -397,6 +409,9 @@ function updatePlayerMovement(player, dt) {
 
 function broadcastSnapshot() {
   const at = Date.now();
+  for (const player of players.values()) {
+    recordPlayerPosition(player, at);
+  }
   const snapshot = {
     type: "snapshot",
     sentAt: at,
@@ -586,6 +601,62 @@ function safeColor(value, fallback) {
 function clampNumber(value, min, max, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
+}
+
+function recordPlayerPosition(player, at = Date.now()) {
+  if (!player) return;
+  const history = player.positionHistory || (player.positionHistory = []);
+  const last = history[history.length - 1];
+  if (
+    !last ||
+    at - last.at >= 20 ||
+    dist(last.x, last.y, player.x, player.y) > 0.25 ||
+    Math.abs(angleDelta(player.facing || 0, last.facing || 0)) > 0.005
+  ) {
+    history.push({
+      at,
+      x: player.x,
+      y: player.y,
+      facing: player.facing || 0,
+    });
+  }
+
+  const oldest = at - POSITION_HISTORY_MS;
+  while (history.length > 2 && history[0].at < oldest) {
+    history.shift();
+  }
+}
+
+function historicalPlayerPosition(player, observedAt) {
+  const history = player?.positionHistory;
+  if (!history?.length || !Number.isFinite(observedAt)) return null;
+
+  const first = history[0];
+  const last = history[history.length - 1];
+  if (observedAt <= first.at) {
+    return first.at - observedAt <= 100 ? first : null;
+  }
+  if (observedAt >= last.at) {
+    return observedAt - last.at <= 100 ? last : null;
+  }
+
+  for (let index = 1; index < history.length; index += 1) {
+    const next = history[index];
+    if (next.at < observedAt) continue;
+    const previous = history[index - 1];
+    const span = Math.max(1, next.at - previous.at);
+    const amount = clamp((observedAt - previous.at) / span, 0, 1);
+    return {
+      at: observedAt,
+      x: previous.x + (next.x - previous.x) * amount,
+      y: previous.y + (next.y - previous.y) * amount,
+      facing:
+        previous.facing +
+        angleDelta(next.facing || 0, previous.facing || 0) * amount,
+    };
+  }
+
+  return null;
 }
 
 function clampObservedCoordinate(value, min, max) {
