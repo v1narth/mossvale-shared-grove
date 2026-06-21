@@ -149,6 +149,9 @@ export default function App() {
       targetX = 0,
       targetY,
       targetZ,
+      originX,
+      originY,
+      originZ,
       facing = 0,
     } = {}) =>
       sendGameServerMessage("attack", {
@@ -156,6 +159,8 @@ export default function App() {
         targetId,
         targetX,
         targetY: targetY ?? targetZ ?? 0,
+        originX,
+        originY: originY ?? originZ,
         facing,
       });
     const ownPlayerIds = () =>

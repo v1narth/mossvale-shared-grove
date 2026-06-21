@@ -13,19 +13,26 @@ const PLAYER_SPRINT_MULTIPLIER = 1.45;
 const PLAYER_3D_SPRINT_MULTIPLIER = 315 / 195;
 const PLAYER_RADIUS = 17;
 const ATTACK_FUDGE = 26;
+const ATTACK_OBSERVED_TARGET_FUDGE = 150;
+const ATTACK_OBSERVED_ORIGIN_FUDGE = 130;
 const EQUIPMENT_SLOTS = ["head", "weapon", "body", "offhand", "feet", "charm"];
 
 const weapons = new Map(
   [
     { id: "stick", name: "Walking Stick", range: 36, cooldown: 0.66, damage: 1, type: "melee" },
     { id: "sword", name: "Wooden Sword", range: 48, cooldown: 0.48, damage: 2, type: "melee" },
+    { id: "dagger", name: "Rogue Dagger", range: 38, cooldown: 0.36, damage: 1, type: "melee" },
     { id: "bow", name: "Bow", range: 260, cooldown: 0.96, damage: 2, type: "arrow" },
+    { id: "crossbow", name: "Crossbow", range: 285, cooldown: 1.05, damage: 3, type: "arrow" },
     { id: "pistol", name: "Pistol", range: 215, cooldown: 0.34, damage: 1, type: "bullet" },
     { id: "rifle", name: "Rifle", range: 360, cooldown: 0.82, damage: 3, type: "bullet" },
     { id: "laser", name: "Laser", range: 420, cooldown: 0.42, damage: 1, type: "laser" },
     { id: "spear", name: "Spear", range: 78, cooldown: 0.68, damage: 2, type: "melee" },
     { id: "wand", name: "Wand", range: 235, cooldown: 1.08, damage: 2, type: "spark" },
+    { id: "staff", name: "Staff", range: 275, cooldown: 1.18, damage: 3, type: "spark" },
     { id: "hammer", name: "Hammer", range: 38, cooldown: 1.2, damage: 4, type: "melee" },
+    { id: "battle_axe", name: "Battle Axe", range: 54, cooldown: 0.78, damage: 3, type: "melee" },
+    { id: "great_axe", name: "Great Axe", range: 62, cooldown: 1.08, damage: 4, type: "melee" },
     { id: "blaster", name: "Blaster", range: 295, cooldown: 0.56, damage: 2, type: "laser" },
   ].map((weapon) => [weapon.id, weapon]),
 );
@@ -225,12 +232,20 @@ function handleAttack(attacker, message) {
   const bounds = worldBoundsForRenderer(attacker.renderer);
   const targetX = clampNumber(message.targetX, bounds.minX, bounds.maxX, attacker.x + Math.cos(hitFacing) * weapon.range);
   const targetY = clampNumber(message.targetY, bounds.minY, bounds.maxY, attacker.y + Math.sin(hitFacing) * weapon.range);
+  const originX = clampObservedCoordinate(message.originX, bounds.minX, bounds.maxX, attacker.x);
+  const originY = clampObservedCoordinate(message.originY ?? message.originZ, bounds.minY, bounds.maxY, attacker.y);
+  const hasObservedOrigin =
+    originX != null &&
+    originY != null &&
+    dist(attacker.x, attacker.y, originX, originY) <= ATTACK_OBSERVED_ORIGIN_FUDGE;
   const attack = {
     type: "pvp-attack",
     id: attacker.id,
     weaponId: weapon.id,
     x: attacker.x,
     y: attacker.y,
+    originX: hasObservedOrigin ? originX : attacker.x,
+    originY: hasObservedOrigin ? originY : attacker.y,
     facing: attacker.facing,
     swingMs: weapon.type === "melee" ? 260 : 150,
     targetId: safeId(message.targetId),
@@ -269,20 +284,50 @@ function findAttackHit(attacker, weapon, attack, hitFacing = attack.facing) {
   const candidates = attack.targetId ? [players.get(attack.targetId)].filter(Boolean) : [...players.values()];
   let best = null;
   let bestDistance = Infinity;
+  const originX = Number.isFinite(attack.originX) ? attack.originX : attacker.x;
+  const originY = Number.isFinite(attack.originY) ? attack.originY : attacker.y;
 
   for (const target of candidates) {
     if (target.id === attacker.id || target.hp <= 0) continue;
-    let hit = false;
-    let distance = dist(attacker.x, attacker.y, target.x, target.y);
-    if (weapon.type === "melee") {
-      const angle = Math.atan2(target.y - attacker.y, target.x - attacker.x);
-      hit = distance <= weapon.range + PLAYER_RADIUS + ATTACK_FUDGE && Math.abs(angleDelta(hitFacing, angle)) <= 1.05;
-    } else {
-      distance = pointSegmentDistance(target.x, target.y, attacker.x, attacker.y, attack.targetX, attack.targetY);
-      hit =
-        dist(attacker.x, attacker.y, attack.targetX, attack.targetY) <= weapon.range + ATTACK_FUDGE &&
-        distance <= PLAYER_RADIUS + 14;
+    const positions = [{ x: target.x, y: target.y }];
+    if (
+      attack.targetId === target.id &&
+      dist(target.x, target.y, attack.targetX, attack.targetY) <= ATTACK_OBSERVED_TARGET_FUDGE
+    ) {
+      positions.push({ x: attack.targetX, y: attack.targetY });
     }
+
+    let hit = false;
+    let distance = Infinity;
+
+    for (const position of positions) {
+      let positionHit = false;
+      let positionDistance = dist(originX, originY, position.x, position.y);
+      if (weapon.type === "melee") {
+        const angle = Math.atan2(position.y - originY, position.x - originX);
+        positionHit =
+          positionDistance <= weapon.range + PLAYER_RADIUS + ATTACK_FUDGE &&
+          Math.abs(angleDelta(hitFacing, angle)) <= 1.05;
+      } else {
+        positionDistance = pointSegmentDistance(
+          position.x,
+          position.y,
+          originX,
+          originY,
+          attack.targetX,
+          attack.targetY,
+        );
+        positionHit =
+          dist(originX, originY, attack.targetX, attack.targetY) <= weapon.range + ATTACK_FUDGE &&
+          positionDistance <= PLAYER_RADIUS + 14;
+      }
+
+      if (positionHit && positionDistance < distance) {
+        hit = true;
+        distance = positionDistance;
+      }
+    }
+
     if (hit && distance < bestDistance) {
       best = target;
       bestDistance = distance;
@@ -541,6 +586,11 @@ function safeColor(value, fallback) {
 function clampNumber(value, min, max, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;
+}
+
+function clampObservedCoordinate(value, min, max) {
+  const number = Number(value);
+  return Number.isFinite(number) ? clamp(number, min, max) : null;
 }
 
 function clamp(value, min, max) {

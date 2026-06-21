@@ -8220,6 +8220,8 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
       targetId: entry.id,
       targetX: entry.position.x,
       targetZ: entry.position.z,
+      originX: attack.origin.x,
+      originZ: attack.origin.z,
       facing: attack.facing,
     });
 
