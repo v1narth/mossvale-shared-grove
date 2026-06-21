@@ -11,7 +11,7 @@ import { gameRuntimeStore } from "./gameRuntimeStore.js";
 import { EQUIPMENT_SLOTS } from "./gameUiData.js";
 
 const ThreeWorldPreview = lazy(() => import("./ThreeWorldPreview.jsx"));
-const PLAYER_PRESENCE_SYNC_INTERVAL_MS = 85;
+const PLAYER_PRESENCE_SYNC_INTERVAL_MS = 50;
 const PLAYER_PRESENCE_SAVE_DELAY_MS = 35;
 const PLAYER_PRESENCE_MOVE_DISTANCE = 4;
 const PLAYER_PRESENCE_FACING_DELTA = 0.035;
@@ -328,6 +328,8 @@ export default function App() {
         }
         if (message.type === "snapshot") {
           const ownIds = new Set([localPlayerId, gameServerPlayerId].filter(Boolean));
+          const receivedAt = Date.now();
+          const snapshotSentAt = Number(message.sentAt) || receivedAt;
           gameRuntimeStore.getState().setRemotePlayers(
             (message.players || [])
               .filter((player) => !ownIds.has(player.id) && player.renderer === "3d")
@@ -344,6 +346,8 @@ export default function App() {
                 }),
                 weaponId: player.weaponId === undefined ? "stick" : player.weaponId,
                 offhandId: player.offhandId || null,
+                vx: Number(player.vx) || 0,
+                vz: Number(player.vz ?? player.vy) || 0,
                 movementState: player.movementState || "idle",
                 actionState: player.actionState || "idle",
                 actionTool: player.actionTool || null,
@@ -355,7 +359,8 @@ export default function App() {
                 maxHp: Number.isFinite(Number(player.maxHp))
                   ? Number(player.maxHp)
                   : 5,
-                updatedAt: Number(player.sentAt) || Date.now(),
+                sentAt: Number(player.sentAt) || snapshotSentAt,
+                updatedAt: receivedAt,
               })),
           );
         }

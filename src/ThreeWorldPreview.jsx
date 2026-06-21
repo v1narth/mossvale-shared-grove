@@ -96,6 +96,12 @@ const PLAYER_HEAD_LOOK_DAMPING = 12;
 const PLAYER_STORE_SYNC_INTERVAL = 0.05;
 const PLAYER_STORE_SYNC_DISTANCE = 2.5;
 const PLAYER_STORE_SYNC_FACING_DELTA = 0.025;
+const REMOTE_PLAYER_INTERPOLATION_DELAY_MS = 110;
+const REMOTE_PLAYER_MAX_EXTRAPOLATION_MS = 120;
+const REMOTE_PLAYER_POSITION_DAMPING = 15;
+const REMOTE_PLAYER_ROTATION_DAMPING = 18;
+const REMOTE_PLAYER_SAMPLE_EPSILON = 0.75;
+const REMOTE_PLAYER_MAX_PREDICT_SPEED = PLAYER_RUN_SPEED * 1.25;
 const MOVE_TARGET_VISUAL_UPDATE_DISTANCE = 8;
 const MOVE_TARGET_STORE_SYNC_INTERVAL_MS = 250;
 const MOVE_TARGET_STORE_SYNC_DISTANCE = 80;
@@ -2437,6 +2443,22 @@ function dampAngle(current, target, damping, delta) {
     current +
     shortestAngleDelta(target, current) * (1 - Math.exp(-damping * delta))
   );
+}
+
+function clampPlanarVelocity(vx, vz, maxSpeed) {
+  const speed = Math.hypot(vx, vz);
+  if (!Number.isFinite(speed) || speed <= maxSpeed) {
+    return {
+      vx: Number.isFinite(vx) ? vx : 0,
+      vz: Number.isFinite(vz) ? vz : 0,
+    };
+  }
+  const scale = maxSpeed / speed;
+  return { vx: vx * scale, vz: vz * scale };
+}
+
+function currentFrameTime() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
 
 function createCreatureCombatStates() {
@@ -5657,11 +5679,19 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
   );
   const playerWeaponId = playerEquipment.weapon;
   const playerRef = useRef(null);
-  const targetRef = useRef({
-    x: player.x,
-    z: player.z,
-    facing: player.facing,
-  });
+  const sampleHistoryRef = useRef([
+    {
+      x: Number(player.x) || 0,
+      z: Number(player.z) || 0,
+      facing: Number(player.facing) || 0,
+      vx: 0,
+      vz: 0,
+      receivedAt: currentFrameTime(),
+    },
+  ]);
+  const renderTargetRef = useRef(
+    new THREE.Vector3(Number(player.x) || 0, 0, Number(player.z) || 0),
+  );
   const isMovingRef = useRef(false);
   const isRunningRef = useRef(false);
   const isBlockingRef = useRef(false);
@@ -5711,11 +5741,32 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
   }, [attackableRegistryRef, player.id]);
 
   useEffect(() => {
-    targetRef.current = {
-      x: player.x,
-      z: player.z,
-      facing: player.facing,
-    };
+    const history = sampleHistoryRef.current;
+    const last = history[history.length - 1];
+    const receivedAt = currentFrameTime();
+    const x = Number(player.x) || 0;
+    const z = Number(player.z) || 0;
+    const facing = Number(player.facing) || 0;
+    const movedSq = (x - last.x) ** 2 + (z - last.z) ** 2;
+    const turned = Math.abs(shortestAngleDelta(facing, last.facing));
+
+    if (
+      movedSq > REMOTE_PLAYER_SAMPLE_EPSILON * REMOTE_PLAYER_SAMPLE_EPSILON ||
+      turned > 0.01
+    ) {
+      const dt = Math.max(0.001, (receivedAt - last.receivedAt) / 1000);
+      const velocity = clampPlanarVelocity(
+        (x - last.x) / dt,
+        (z - last.z) / dt,
+        REMOTE_PLAYER_MAX_PREDICT_SPEED,
+      );
+      history.push({ x, z, facing, ...velocity, receivedAt });
+      if (history.length > 10) history.splice(0, history.length - 10);
+    } else if (player.movementState === 'idle') {
+      last.vx = 0;
+      last.vz = 0;
+    }
+
     headLookOverrideRef.current = {
       yaw: Number(player.headYaw) || 0,
       pitch: Number(player.headPitch) || 0,
@@ -5731,6 +5782,7 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
     player.hp,
     player.maxHp,
     player.name,
+    player.movementState,
     player.x,
     player.z,
   ]);
@@ -5792,7 +5844,48 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
     const root = playerRef.current;
     if (!root) return;
 
-    const target = targetRef.current;
+    const history = sampleHistoryRef.current;
+    const renderAt = currentFrameTime() - REMOTE_PLAYER_INTERPOLATION_DELAY_MS;
+    let previous = history[0];
+    let next = null;
+
+    for (let index = 1; index < history.length; index += 1) {
+      if (history[index].receivedAt >= renderAt) {
+        next = history[index];
+        break;
+      }
+      previous = history[index];
+    }
+
+    let targetX = previous.x;
+    let targetZ = previous.z;
+    let targetFacing = previous.facing;
+    let targetSpeed = Math.hypot(previous.vx || 0, previous.vz || 0);
+
+    if (next) {
+      const span = Math.max(1, next.receivedAt - previous.receivedAt);
+      const amount = THREE.MathUtils.clamp(
+        (renderAt - previous.receivedAt) / span,
+        0,
+        1,
+      );
+      targetX = THREE.MathUtils.lerp(previous.x, next.x, amount);
+      targetZ = THREE.MathUtils.lerp(previous.z, next.z, amount);
+      targetFacing =
+        previous.facing + shortestAngleDelta(next.facing, previous.facing) * amount;
+      targetSpeed = Math.hypot(next.vx || 0, next.vz || 0);
+    } else {
+      const extrapolateSeconds =
+        Math.min(
+          REMOTE_PLAYER_MAX_EXTRAPOLATION_MS,
+          Math.max(0, renderAt - previous.receivedAt),
+        ) / 1000;
+      targetX += (previous.vx || 0) * extrapolateSeconds;
+      targetZ += (previous.vz || 0) * extrapolateSeconds;
+    }
+
+    const target = renderTargetRef.current;
+    target.set(targetX, 0, targetZ);
     const surfaceY = buildSurfaceHeightAt(target.x, target.z, buildings);
     const distanceSq =
       (root.position.x - target.x) ** 2 + (root.position.z - target.z) ** 2;
@@ -5800,15 +5893,20 @@ function RemotePlayerAvatar({ attackableRegistryRef, buildings, onAttack, player
     if (distanceSq > 700 * 700) {
       root.position.set(target.x, surfaceY, target.z);
     } else {
-      const alpha = 1 - Math.exp(-22 * delta);
+      const alpha = 1 - Math.exp(-REMOTE_PLAYER_POSITION_DAMPING * delta);
       root.position.x = THREE.MathUtils.lerp(root.position.x, target.x, alpha);
       root.position.z = THREE.MathUtils.lerp(root.position.z, target.z, alpha);
       root.position.y = THREE.MathUtils.damp(root.position.y, surfaceY, 24, delta);
     }
 
-    root.rotation.y = dampAngle(root.rotation.y, target.facing || 0, 22, delta);
+    root.rotation.y = dampAngle(
+      root.rotation.y,
+      targetFacing || 0,
+      REMOTE_PLAYER_ROTATION_DAMPING,
+      delta,
+    );
     const movingByState = player.movementState !== 'idle';
-    isMovingRef.current = movingByState || distanceSq > 10 * 10;
+    isMovingRef.current = movingByState || targetSpeed > 12 || distanceSq > 8 * 8;
     isRunningRef.current = player.movementState === 'running';
     attackableEntryRef.current.position.copy(root.position);
   });
