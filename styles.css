@@ -6,7 +6,7 @@
   background: #102019;
   color: #f2f5e8;
   --cursor-game: auto;
-  --slot-frame-image: url("/assets/ui/slot-frame-ink.png");
+  --slot-frame-image: var(--ui-slot-frame-ink);
 }
 
 * {
@@ -769,28 +769,28 @@ canvas {
 }
 
 .inventory-slot-level-1 {
-  --slot-frame-image: url("/assets/ui/slot-frame-gold.png");
+  --slot-frame-image: var(--ui-slot-frame-gold);
   --slot-ring: rgba(229, 236, 178, 0.34);
   --slot-glow-size: 8px;
   --slot-glow: rgba(211, 228, 153, 0.1);
 }
 
 .inventory-slot-level-2 {
-  --slot-frame-image: url("/assets/ui/slot-frame-moss.png");
+  --slot-frame-image: var(--ui-slot-frame-moss);
   --slot-ring: rgba(185, 229, 146, 0.46);
   --slot-glow-size: 11px;
   --slot-glow: rgba(149, 238, 131, 0.14);
 }
 
 .inventory-slot-level-3 {
-  --slot-frame-image: url("/assets/ui/slot-frame-blue.png");
+  --slot-frame-image: var(--ui-slot-frame-blue);
   --slot-ring: rgba(142, 212, 244, 0.56);
   --slot-glow-size: 14px;
   --slot-glow: rgba(93, 194, 246, 0.18);
 }
 
 .inventory-slot-level-4 {
-  --slot-frame-image: url("/assets/ui/slot-frame-violet.png");
+  --slot-frame-image: var(--ui-slot-frame-violet);
   --slot-ring: rgba(219, 165, 255, 0.66);
   --slot-glow-size: 17px;
   --slot-glow: rgba(190, 114, 255, 0.24);
@@ -931,7 +931,7 @@ canvas {
   position: absolute;
   z-index: 2;
   inset: -3px;
-  background: url("/assets/ui/slot-frame-ivory.png") center / 100% 100% no-repeat;
+  background: var(--ui-slot-frame-ivory) center / 100% 100% no-repeat;
   content: "";
   filter: drop-shadow(0 0 5px rgba(255, 250, 222, 0.18));
   pointer-events: none;
@@ -2766,7 +2766,7 @@ button {
   position: absolute;
   z-index: 5;
   inset: 0;
-  background: url("/assets/ui/status-frame.png") center / 100% 100% no-repeat;
+  background: var(--ui-status-frame) center / 100% 100% no-repeat;
   content: "";
   pointer-events: none;
 }

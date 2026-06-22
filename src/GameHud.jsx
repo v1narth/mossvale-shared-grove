@@ -16,7 +16,10 @@ import {
   weaponDefs,
 } from './gameUiData.js';
 import { gameUiStore } from './gameUiStore.js';
+import { publicAssetUrl } from './publicAssets.js';
 import { useGameUiStore } from './useGameUiStore.js';
+
+const PLAYER_AVATAR_SRC = publicAssetUrl('ui/player-avatar.png');
 
 function percent(current, max) {
   return `${Math.round((current / Math.max(1, max)) * 100)}%`;
@@ -102,7 +105,7 @@ function PlayerCard() {
     <div className="player-card">
       <div className="player-identity">
         <div id="playerAvatar" className="traveler-avatar" aria-hidden="true">
-          <img src="/assets/ui/player-avatar.png" alt="" draggable="false" />
+          <img src={PLAYER_AVATAR_SRC} alt="" draggable="false" />
         </div>
         <span id="playerName" className="player-nameplate">
           {playerName}

@@ -13,10 +13,24 @@
     <script>
       const mossvaleConfigValue = (value, fallback = '') =>
         value && !value.startsWith('%') ? value : fallback;
+      const mossvaleAssetBase = mossvaleConfigValue('%BASE_URL%', '/') + 'assets/';
+      const mossvaleAssetUrl = (path) => `${mossvaleAssetBase}${path.replace(/^\/+/, '')}`;
+      const mossvaleCssUrl = (path) => `url("${mossvaleAssetUrl(path)}")`;
       document.documentElement.style.setProperty(
         '--cursor-game',
-        'url("%BASE_URL%assets/ui/cursor-stone-arrow.svg") 4 3, auto',
+        `${mossvaleCssUrl('ui/cursor-stone-arrow.svg')} 4 3, auto`,
       );
+      Object.entries({
+        '--ui-slot-frame-ink': 'ui/slot-frame-ink.png',
+        '--ui-slot-frame-gold': 'ui/slot-frame-gold.png',
+        '--ui-slot-frame-moss': 'ui/slot-frame-moss.png',
+        '--ui-slot-frame-blue': 'ui/slot-frame-blue.png',
+        '--ui-slot-frame-violet': 'ui/slot-frame-violet.png',
+        '--ui-slot-frame-ivory': 'ui/slot-frame-ivory.png',
+        '--ui-status-frame': 'ui/status-frame.png',
+      }).forEach(([name, path]) => {
+        document.documentElement.style.setProperty(name, mossvaleCssUrl(path));
+      });
 
       window.MOSSVALE_GAME_SERVER = {
         url: mossvaleConfigValue('%VITE_MOSSVALE_GAME_SERVER_URL%'),

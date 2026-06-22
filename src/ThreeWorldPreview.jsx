@@ -54,6 +54,7 @@ import {
   weaponDefs,
 } from './gameUiData.js';
 import { playSfx } from './audioRuntime.js';
+import { publicAssetUrl as assetUrl } from './publicAssets.js';
 import {
   flushCloudWorldStateSave,
   scheduleCloudWorldStateSave,
@@ -86,8 +87,6 @@ function normalizeAvatarEquipment(equipment = {}, weaponId = 'stick', offhandId 
 }
 
 const WORLD_SIZE = { width: 7200, height: 5200 };
-const PUBLIC_ASSET_BASE = `${import.meta.env.BASE_URL || '/'}assets/`;
-const assetUrl = (path) => `${PUBLIC_ASSET_BASE}${path.replace(/^\/+/, '')}`;
 const PLAYER_WALK_SPEED = 195;
 const PLAYER_RUN_SPEED = 315;
 const PLAYER_COLLISION_RADIUS = 26;

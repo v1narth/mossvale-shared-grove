@@ -1,3 +1,5 @@
+import { publicAssetUrl } from './publicAssets.js';
+
 export const PLAYER_NAME_STORAGE_KEY = 'mossvale_player_name';
 
 export const RESOURCE_KEYS = ['wood', 'stone', 'flower', 'cotton'];
@@ -5,8 +7,7 @@ export const BAG_SLOT_COUNT = 30;
 export const QUICK_SLOT_COUNT = 9;
 export const EQUIPMENT_SLOTS = ['head', 'weapon', 'body', 'offhand', 'charm', 'legs', 'charm2', 'feet'];
 
-const PUBLIC_ASSET_BASE = `${import.meta.env.BASE_URL || '/'}assets/`;
-const INVENTORY_ICON_BASE = `${PUBLIC_ASSET_BASE}inventory`;
+const INVENTORY_ICON_BASE = publicAssetUrl('inventory');
 const CRAFT_RESOURCE_ICON_BASE = `${INVENTORY_ICON_BASE}/craft-resources`;
 
 function inventoryImage(key) {
