@@ -8,7 +8,7 @@ import {
 } from "./cloudPersistence.js";
 import { gameUiStore, installGameUiApi } from "./gameUiStore.js";
 import { gameRuntimeStore } from "./gameRuntimeStore.js";
-import { EQUIPMENT_SLOTS } from "./gameUiData.js";
+import { EQUIPMENT_SLOTS, weaponDefs } from "./gameUiData.js";
 
 const ThreeWorldPreview = lazy(() => import("./ThreeWorldPreview.jsx"));
 const PLAYER_PRESENCE_SYNC_INTERVAL_MS = 50;
@@ -34,6 +34,19 @@ function normalizePresenceEquipment(equipment = {}) {
       typeof equipment?.[slot] === "string" ? equipment[slot] : null,
     ]),
   );
+}
+
+function weaponActionTool(weaponId = "stick") {
+  const weapon = weaponDefs.find((item) => item.id === weaponId);
+  const weaponType = weapon?.weaponType || "melee";
+  if (weaponType === "melee") {
+    if (weaponId === "sword") return "sword";
+    if (weaponId === "battle_axe" || weaponId === "great_axe") return "heavy_axe";
+    return "weapon";
+  }
+  if (weaponType === "arrow") return weaponId === "crossbow" ? "crossbow" : "bow";
+  if (weaponType === "spark") return "cast";
+  return "shoot";
 }
 
 function resolveGameServerUrl() {
@@ -209,7 +222,7 @@ export default function App() {
         id: message.id,
         weaponId: message.weaponId || existing?.weaponId || "sword",
         actionState: "attack",
-        actionTool: "sword",
+        actionTool: weaponActionTool(message.weaponId || existing?.weaponId || "sword"),
         actionSequence: (existing?.actionSequence || 0) + 1,
         facing: Number.isFinite(Number(message.facing))
           ? Number(message.facing)
@@ -410,12 +423,7 @@ export default function App() {
     const unsubscribeUiPresence = gameUiStore.subscribe((state, previousState) => {
       if (
         state.playerName === previousState?.playerName &&
-        state.equipment.head === previousState?.equipment?.head &&
-        state.equipment.weapon === previousState?.equipment?.weapon &&
-        state.equipment.body === previousState?.equipment?.body &&
-        state.equipment.offhand === previousState?.equipment?.offhand &&
-        state.equipment.feet === previousState?.equipment?.feet &&
-        state.equipment.charm === previousState?.equipment?.charm
+        EQUIPMENT_SLOTS.every((slotId) => state.equipment[slotId] === previousState?.equipment?.[slotId])
       ) {
         return;
       }

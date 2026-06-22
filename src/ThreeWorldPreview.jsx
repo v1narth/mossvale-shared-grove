@@ -47,7 +47,12 @@ import {
   uv,
   vec2,
 } from 'three/tsl';
-import { EQUIPMENT_SLOTS, buildPieces, weaponDefs } from './gameUiData.js';
+import {
+  EQUIPMENT_SLOTS,
+  buildPieces,
+  itemForKey,
+  weaponDefs,
+} from './gameUiData.js';
 import { playSfx } from './audioRuntime.js';
 import {
   flushCloudWorldStateSave,
@@ -142,6 +147,12 @@ const ATTACK_ANIMATION_URL = assetUrl(
 const PICKAXE_ATTACK_ANIMATION_URL = assetUrl(
   'models/adventurers/animations/standing_melee_attack_downward.fbx',
 );
+const BOW_ATTACK_ANIMATION_URL = assetUrl(
+  'models/adventurers/animations/standing_draw_arrow.fbx',
+);
+const MAGIC_ATTACK_ANIMATION_URL = assetUrl(
+  'models/adventurers/animations/standing_1h_magic_attack_01.fbx',
+);
 const BLOCK_ANIMATION_URL = assetUrl(
   'models/adventurers/animations/standing_block_idle.fbx',
 );
@@ -162,6 +173,11 @@ const DEFAULT_WEAPON_ATTACK = {
   animationDuration: 0.44,
   damage: 2,
 };
+const RANGED_ATTACK_TOOLS = new Set(['bow', 'crossbow', 'shoot', 'cast']);
+const DOWNWARD_ATTACK_TOOLS = new Set(['pickaxe', 'heavy_axe']);
+const PROJECTILE_LAUNCH_HEIGHT = 70;
+const PROJECTILE_HIT_HEIGHT = 52;
+const PROJECTILE_DEFAULT_SPEED = 560;
 const CREATURE_RESPAWN_MS = 8000;
 const MAX_GATHER_PARTICLES = 96;
 const GATHER_PARTICLE_MATERIALS = {
@@ -189,10 +205,10 @@ const GATHER_SWING_DURATION = 1.08;
 const GATHER_ATTACK_TRIM_END = 0.16;
 const GATHER_HUD_SYNC_INTERVAL = 1 / 12;
 const RESOURCE_NODE_LABEL_Y_OFFSET = {
-  tree: 196,
-  stone: 88,
-  flower: 46,
-  cotton: 50,
+  tree: 226,
+  stone: 112,
+  flower: 66,
+  cotton: 70,
 };
 const GATHER_RESOURCE_CONFIG = {
   tree: {
@@ -328,6 +344,10 @@ const KAYKIT_HELD_WEAPON_CONFIG = Object.freeze({
       position: { x: 0.014, y: 0.058, z: 0.07 },
       rotation: { x: 82, y: -170, z: -10 },
     },
+    shootHandTransform: {
+      position: { x: 0.032, y: 0.052, z: 0.084 },
+      rotation: { x: -76, y: -118, z: -34 },
+    },
   },
   crossbow: {
     scale: 0.72,
@@ -335,11 +355,45 @@ const KAYKIT_HELD_WEAPON_CONFIG = Object.freeze({
       position: { x: 0.012, y: 0.06, z: 0.064 },
       rotation: { x: -2, y: -178, z: -8 },
     },
+    shootHandTransform: {
+      position: { x: 0.03, y: 0.05, z: 0.092 },
+      rotation: { x: -8, y: -112, z: -24 },
+    },
   },
   dagger: { scale: 0.88 },
   great_axe: { scale: 0.78 },
-  staff: { scale: 0.62 },
-  wand: { scale: 0.96 },
+  staff: {
+    scale: 0.62,
+    shootHandTransform: {
+      position: { x: 0.032, y: 0.05, z: 0.09 },
+      rotation: { x: -38, y: -118, z: -38 },
+    },
+  },
+  wand: {
+    scale: 0.96,
+    shootHandTransform: {
+      position: { x: 0.034, y: 0.045, z: 0.092 },
+      rotation: { x: -30, y: -116, z: -36 },
+    },
+  },
+});
+const GENERIC_RANGED_WEAPON_HAND_TRANSFORMS = Object.freeze({
+  bow: {
+    position: { x: 0.032, y: 0.052, z: 0.084 },
+    rotation: { x: -76, y: -118, z: -34 },
+  },
+  crossbow: {
+    position: { x: 0.03, y: 0.05, z: 0.092 },
+    rotation: { x: -8, y: -112, z: -24 },
+  },
+  spark: {
+    position: { x: 0.034, y: 0.045, z: 0.092 },
+    rotation: { x: -32, y: -116, z: -36 },
+  },
+  default: {
+    position: { x: 0.032, y: 0.048, z: 0.09 },
+    rotation: { x: -18, y: -112, z: -30 },
+  },
 });
 const SIMPLE_PICKAXE_TRANSFORMS = {
   idle: {
@@ -1723,6 +1777,32 @@ function applyBlockingPose(rig, weight) {
   }
 }
 
+function applyRangedAttackPose(rig, weight) {
+  if (weight <= 0.001) return;
+  const w = THREE.MathUtils.clamp(weight, 0, 1);
+  if (rig?.chest) {
+    rig.chest.rotation.x += THREE.MathUtils.degToRad(-2) * w;
+    rig.chest.rotation.y += THREE.MathUtils.degToRad(-4) * w;
+  }
+  if (rig?.upperRightArm) {
+    rig.upperRightArm.rotation.x += THREE.MathUtils.degToRad(-36) * w;
+    rig.upperRightArm.rotation.y += THREE.MathUtils.degToRad(18) * w;
+    rig.upperRightArm.rotation.z += THREE.MathUtils.degToRad(-22) * w;
+  }
+  if (rig?.lowerRightArm) {
+    rig.lowerRightArm.rotation.x += THREE.MathUtils.degToRad(-34) * w;
+    rig.lowerRightArm.rotation.z += THREE.MathUtils.degToRad(-10) * w;
+  }
+  if (rig?.upperLeftArm) {
+    rig.upperLeftArm.rotation.x += THREE.MathUtils.degToRad(-22) * w;
+    rig.upperLeftArm.rotation.y += THREE.MathUtils.degToRad(-18) * w;
+    rig.upperLeftArm.rotation.z += THREE.MathUtils.degToRad(24) * w;
+  }
+  if (rig?.lowerLeftArm) {
+    rig.lowerLeftArm.rotation.x += THREE.MathUtils.degToRad(-18) * w;
+  }
+}
+
 function createUpperBodyAnimationClip(clip, name = `${clip?.name || 'UpperBody'}_Upper`) {
   if (!clip) return null;
   const upperBodyTrackNames = [
@@ -1865,6 +1945,9 @@ function createKayKitHeldWeaponObject(weaponId, sourceScene) {
   model.scale.setScalar(config.scale || 0.86);
   group.userData.handTransform =
     config.handTransform || GENERIC_WEAPON_HAND_TRANSFORM;
+  group.userData.shootHandTransform =
+    config.shootHandTransform ||
+    GENERIC_RANGED_WEAPON_HAND_TRANSFORMS.default;
   group.add(model);
   return finishHeldWeaponObject(group);
 }
@@ -1939,7 +2022,7 @@ function createEquipmentWearables(equipment = {}) {
     }
   }
 
-  if (equipment.charm === 'petal_charm') {
+  if (equipment.charm === 'petal_charm' || equipment.charm2 === 'petal_charm') {
     const pendant = new THREE.Group();
     pendant.name = 'custom_petal_charm';
     const cord = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.008, 6, 18, Math.PI * 1.25), trim);
@@ -1959,6 +2042,13 @@ function createHeldWeaponObject(weaponId = 'stick') {
   const group = new THREE.Group();
   group.name = `custom_held_weapon_${weaponId}`;
   const weapon = weaponDefs.find((item) => item.id === weaponId);
+  const weaponType = weapon?.weaponType || 'melee';
+  if (weaponType !== 'melee') {
+    group.userData.shootHandTransform =
+      GENERIC_RANGED_WEAPON_HAND_TRANSFORMS[weaponType] ||
+      GENERIC_RANGED_WEAPON_HAND_TRANSFORMS[weaponId] ||
+      GENERIC_RANGED_WEAPON_HAND_TRANSFORMS.default;
+  }
   const accentColor = weapon?.color || '#d7a45c';
   const wood = new THREE.MeshStandardMaterial({
     color: '#9a663c',
@@ -2141,6 +2231,18 @@ function createHeldTorchObject() {
   torch.userData.light = light;
   torch.userData.ember = ember;
   return torch;
+}
+
+function setHeldTorchVisuals(torch, visible) {
+  torch.visible = true;
+  torch.traverse((child) => {
+    if (child.isLight) {
+      child.visible = true;
+      if (!visible) child.intensity = 0;
+      return;
+    }
+    if (child !== torch) child.visible = visible;
+  });
 }
 
 function disposeObjectMaterialsAndGeometry(object) {
@@ -2499,7 +2601,11 @@ function weaponAttackProfile(weapon) {
   const isMelee = weaponType === 'melee';
   const range = isMelee
     ? Math.max(90, (Number(weapon?.range) || DEFAULT_WEAPON_ATTACK.range) + 72)
-    : Math.max(160, (Number(weapon?.range) || DEFAULT_WEAPON_ATTACK.range) * 1.1);
+    : Math.max(
+        160,
+        (Number(weapon?.range) || DEFAULT_WEAPON_ATTACK.range) *
+          (weaponType === 'spark' ? 1.15 : 1.1),
+      );
   const halfWidth = isMelee
     ? weapon?.id === 'dagger'
       ? 16
@@ -2512,15 +2618,68 @@ function weaponAttackProfile(weapon) {
       ? 24
       : 18;
   return {
-    animationDuration: isMelee ? 0.44 : 0.36,
+    animationDuration: isMelee
+      ? weapon?.id === 'great_axe'
+        ? 0.62
+        : weapon?.id === 'battle_axe'
+          ? 0.52
+          : 0.44
+      : weaponType === 'arrow'
+        ? weapon?.id === 'crossbow'
+          ? 0.58
+          : 0.72
+        : weaponType === 'spark'
+          ? weapon?.id === 'staff'
+            ? 0.48
+            : 0.42
+          : 0.36,
     cooldownMs: Math.max(220, (Number(weapon?.cooldown) || 0.5) * 1000),
     damage: Math.max(1, Number(weapon?.damage) || DEFAULT_WEAPON_ATTACK.damage),
     halfWidth,
-    impactMs: isMelee ? 150 : 110,
+    impactMs: isMelee
+      ? 150
+      : weaponType === 'arrow'
+        ? weapon?.id === 'crossbow'
+          ? 300
+          : 430
+        : weaponType === 'spark'
+          ? weapon?.id === 'staff'
+            ? 320
+            : 260
+          : 110,
+    projectileRadius: weaponType === 'spark' ? 12 : 11,
+    projectileSpeed: isMelee
+      ? 0
+      : weaponType === 'spark'
+        ? Math.max(520, Number(weapon?.speed) ? Number(weapon.speed) * 1.05 : 620)
+        : Math.max(
+            240,
+            Number(weapon?.speed) || PROJECTILE_DEFAULT_SPEED,
+          ),
     range,
     sfx: isMelee ? 'melee' : weaponType === 'spark' ? 'laser' : 'shot',
     type: weaponType,
   };
+}
+
+function isRangedAttackProfile(profile) {
+  return Boolean(profile && profile.type !== 'melee');
+}
+
+function weaponActionTool(weapon) {
+  const weaponType = weapon?.weaponType || 'melee';
+  if (weaponType === 'melee') {
+    if (weapon?.id === 'sword') return 'sword';
+    if (weapon?.id === 'battle_axe' || weapon?.id === 'great_axe') {
+      return 'heavy_axe';
+    }
+    return 'weapon';
+  }
+  if (weaponType === 'arrow') {
+    return weapon?.id === 'crossbow' ? 'crossbow' : 'bow';
+  }
+  if (weaponType === 'spark') return 'cast';
+  return 'shoot';
 }
 
 function weaponAttackIntersects(entry, attack) {
@@ -2565,6 +2724,58 @@ function findWeaponAttackHit(attackables, states, attack) {
       best = entry;
       bestForwardDistance = forwardDistance;
     }
+  }
+  return best;
+}
+
+function isAttackableProjectileTarget(entry, states, time = Date.now()) {
+  if (!entry) return false;
+  if (entry.type === 'creature') {
+    const state = states[entry.id];
+    return Boolean(state && !isCreatureStateDefeated(state, time));
+  }
+  if (entry.type === 'player') return entry.hp > 0;
+  return false;
+}
+
+function projectileIntersectsEntry(entry, from, to, radius) {
+  const targetRadius = (entry.radius || 36) + radius;
+  const segmentX = to.x - from.x;
+  const segmentZ = to.z - from.z;
+  const segmentLengthSq = segmentX * segmentX + segmentZ * segmentZ;
+  if (segmentLengthSq <= 0.0001) return null;
+
+  const targetX = entry.position.x;
+  const targetZ = entry.position.z;
+  const t = THREE.MathUtils.clamp(
+    ((targetX - from.x) * segmentX + (targetZ - from.z) * segmentZ) /
+      segmentLengthSq,
+    0,
+    1,
+  );
+  const closestX = from.x + segmentX * t;
+  const closestZ = from.z + segmentZ * t;
+  const dx = targetX - closestX;
+  const dz = targetZ - closestZ;
+  if (dx * dx + dz * dz > targetRadius * targetRadius) return null;
+  return t;
+}
+
+function findProjectileHit(attackables, states, projectile, from, to) {
+  const time = Date.now();
+  let best = null;
+  let bestT = Infinity;
+  for (const entry of attackables.values()) {
+    if (!isAttackableProjectileTarget(entry, states, time)) continue;
+    const t = projectileIntersectsEntry(
+      entry,
+      from,
+      to,
+      projectile.profile.projectileRadius,
+    );
+    if (t == null || t >= bestT) continue;
+    best = entry;
+    bestT = t;
   }
   return best;
 }
@@ -3369,6 +3580,7 @@ function Ground({
   );
   const rightNavigationRef = useRef({
     active: false,
+    buttons: 0,
     clientX: 0,
     clientY: 0,
     hasPointer: false,
@@ -3404,6 +3616,7 @@ function Ground({
 
     rightNavigationRef.current = {
       active: false,
+      buttons: 0,
       clientX: 0,
       clientY: 0,
       hasPointer: false,
@@ -3418,6 +3631,7 @@ function Ground({
     if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
 
     const navigation = rightNavigationRef.current;
+    navigation.buttons = Number(source.buttons ?? event.buttons) || 0;
     navigation.clientX = clientX;
     navigation.clientY = clientY;
     navigation.hasPointer = true;
@@ -3482,6 +3696,7 @@ function Ground({
     clearRightNavigation(event);
     rightNavigationRef.current = {
       active: true,
+      buttons: Number(event.buttons) || 2,
       clientX: 0,
       clientY: 0,
       hasPointer: false,
@@ -3507,7 +3722,16 @@ function Ground({
     }
 
     event.stopPropagation();
+    const previousButtons = navigation.buttons || 0;
     syncRightNavigationPointer(event);
+    const currentButtons =
+      Number(event.nativeEvent?.buttons ?? event.sourceEvent?.buttons ?? event.buttons) ||
+      navigation.buttons ||
+      0;
+    if ((currentButtons & 1) && !(previousButtons & 1)) {
+      const attackPoint = projectRightNavigationPoint();
+      if (attackPoint) onAttack(attackPoint.x, attackPoint.z);
+    }
     onMoveTarget(event.point.x, event.point.z);
   };
 
@@ -3545,8 +3769,11 @@ function PlayerTorchFillLight({ playerRef, torchEquipped }) {
     const playerPosition = playerRef.current?.position;
     if (!light) return;
 
-    light.visible = Boolean(torchEquipped && playerPosition);
-    if (!light.visible) return;
+    light.visible = true;
+    if (!torchEquipped || !playerPosition) {
+      light.intensity = 0;
+      return;
+    }
 
     const terrainY = getTerrainHeight(playerPosition.x, playerPosition.z);
     const flicker =
@@ -3564,7 +3791,7 @@ function PlayerTorchFillLight({ playerRef, torchEquipped }) {
       decay={1.42}
       distance={TORCH_FILL_LIGHT_DISTANCE}
       intensity={0}
-      visible={false}
+      visible
     />
   );
 }
@@ -3785,6 +4012,7 @@ function NatureTree({
   scale,
   rotationY = 0,
   onResourceCommand,
+  onResourceHover,
 }) {
   const root = useRef(null);
   const materialUrl = `${NATURE_OBJ_BASE}${file}.mtl`;
@@ -3838,6 +4066,14 @@ function NatureTree({
       rotationY,
     });
   };
+  const handlePointerOver = (event) => {
+    event.stopPropagation();
+    onResourceHover?.(id, true);
+  };
+  const handlePointerOut = (event) => {
+    event.stopPropagation();
+    onResourceHover?.(id, false);
+  };
 
   return (
     <group
@@ -3846,6 +4082,8 @@ function NatureTree({
       rotation-y={rotationY}
       scale={scale}
       onPointerDown={handlePointerDown}
+      onPointerOut={handlePointerOut}
+      onPointerOver={handlePointerOver}
       userData={{ playerOccluder: true }}
     >
       <Clone object={object} />
@@ -3868,6 +4106,7 @@ function NatureStump({
   scale,
   rotationY = 0,
   onResourceCommand,
+  onResourceHover,
 }) {
   const root = useRef(null);
   const materialUrl = `${NATURE_OBJ_BASE}${TREE_STUMP_FILE}.mtl`;
@@ -3893,6 +4132,14 @@ function NatureStump({
     event.stopPropagation();
     onResourceCommand?.({ id, type: 'tree', position, scale, rotationY });
   };
+  const handlePointerOver = (event) => {
+    event.stopPropagation();
+    onResourceHover?.(id, true);
+  };
+  const handlePointerOut = (event) => {
+    event.stopPropagation();
+    onResourceHover?.(id, false);
+  };
 
   return (
     <group
@@ -3901,6 +4148,8 @@ function NatureStump({
       rotation-y={rotationY}
       scale={scale * 0.38}
       onPointerDown={handlePointerDown}
+      onPointerOut={handlePointerOut}
+      onPointerOver={handlePointerOver}
       userData={{ playerOccluder: true }}
     >
       <Clone object={object} />
@@ -3951,6 +4200,8 @@ function CoreAssetPreloader({ onReady }) {
   useGLTF(SHIELD_MODEL_URL);
   useLoader(FBXLoader, ATTACK_ANIMATION_URL);
   useLoader(FBXLoader, PICKAXE_ATTACK_ANIMATION_URL);
+  useLoader(FBXLoader, BOW_ATTACK_ANIMATION_URL);
+  useLoader(FBXLoader, MAGIC_ATTACK_ANIMATION_URL);
   useLoader(FBXLoader, BLOCK_ANIMATION_URL);
   useLoader(FBXLoader, DEATH_ANIMATION_URL);
 
@@ -4033,11 +4284,22 @@ function LowPolyRock({
   position,
   scale = 1,
   onResourceCommand,
+  onResourceHover,
 }) {
   const handlePointerDown = (event) => {
     if (![0, 2].includes(event.button) || depleted) return;
     event.stopPropagation();
     onResourceCommand?.({ id, type: 'stone', position, scale });
+  };
+  const handlePointerOver = (event) => {
+    if (depleted) return;
+    event.stopPropagation();
+    onResourceHover?.(id, true);
+  };
+  const handlePointerOut = (event) => {
+    if (depleted) return;
+    event.stopPropagation();
+    onResourceHover?.(id, false);
   };
 
   return (
@@ -4046,6 +4308,8 @@ function LowPolyRock({
       scale={[34 * scale, depleted ? 6 * scale : 20 * scale, 28 * scale]}
       castShadow={!depleted}
       onPointerDown={handlePointerDown}
+      onPointerOut={handlePointerOut}
+      onPointerOver={handlePointerOver}
       userData={{ playerOccluder: !depleted }}
     >
       <dodecahedronGeometry args={[1, 0]} />
@@ -4067,6 +4331,7 @@ function NatureRock({
   rotationY = 0,
   scale = 1,
   onResourceCommand,
+  onResourceHover,
 }) {
   const materialUrl = `${NATURE_OBJ_BASE}${file}.mtl`;
   const objectUrl = `${NATURE_OBJ_BASE}${file}.obj`;
@@ -4086,6 +4351,14 @@ function NatureRock({
     event.stopPropagation();
     onResourceCommand?.({ id, type: 'stone', position, scale: radius });
   };
+  const handlePointerOver = (event) => {
+    event.stopPropagation();
+    onResourceHover?.(id, true);
+  };
+  const handlePointerOut = (event) => {
+    event.stopPropagation();
+    onResourceHover?.(id, false);
+  };
 
   return (
     <group
@@ -4093,6 +4366,8 @@ function NatureRock({
       rotation-y={rotationY}
       scale={scale}
       onPointerDown={handlePointerDown}
+      onPointerOut={handlePointerOut}
+      onPointerOver={handlePointerOver}
       userData={{ playerOccluder: true }}
     >
       <Clone object={object} />
@@ -4118,6 +4393,7 @@ function NaturePlantResource({
   rotationY = 0,
   scale = 1,
   onResourceCommand,
+  onResourceHover,
 }) {
   const materialUrl = `${NATURE_OBJ_BASE}${file}.mtl`;
   const objectUrl = `${NATURE_OBJ_BASE}${file}.obj`;
@@ -4144,6 +4420,14 @@ function NaturePlantResource({
       rotationY,
     });
   };
+  const handlePointerOver = (event) => {
+    event.stopPropagation();
+    onResourceHover?.(id, true);
+  };
+  const handlePointerOut = (event) => {
+    event.stopPropagation();
+    onResourceHover?.(id, false);
+  };
 
   return (
     <group
@@ -4151,6 +4435,8 @@ function NaturePlantResource({
       rotation-y={rotationY}
       scale={scale}
       onPointerDown={handlePointerDown}
+      onPointerOut={handlePointerOut}
+      onPointerOver={handlePointerOver}
     >
       <Clone object={object} />
       {type === 'flower' ? (
@@ -4339,31 +4625,43 @@ function GatherParticles({ particlesRef }) {
   );
 }
 
-function ResourceNodeOverlay({ active, position, state, type }) {
+function ResourceNodeOverlay({
+  active,
+  id,
+  onResourceHover,
+  position,
+  state,
+  type,
+}) {
   const config = GATHER_RESOURCE_CONFIG[type];
   if (!active || !config) return null;
 
-  const gathered = THREE.MathUtils.clamp(
-    state?.nodesGathered || 0,
-    0,
-    config.nodeCount,
-  );
-  const remaining =
-    state?.depletedUntil > Date.now() ? 0 : config.nodeCount - gathered;
+  void state;
   const labelY = position[1] + RESOURCE_NODE_LABEL_Y_OFFSET[type];
+  const item = itemForKey(config.itemKey);
 
   return (
     <Html
       center
-      distanceFactor={960}
       position={[position[0], labelY, position[2]]}
+      style={{ pointerEvents: 'auto' }}
       transform={false}
       zIndexRange={[20, 0]}
     >
-      <div className={`resource-node-label ${config.itemKey}`}>
-        <strong>{config.label}</strong>
+      <div
+        className={`resource-node-label ${config.itemKey}`}
+        onMouseEnter={(event) => {
+          event.stopPropagation();
+          onResourceHover?.(id, true);
+        }}
+        onMouseLeave={(event) => {
+          event.stopPropagation();
+          onResourceHover?.(id, false);
+        }}
+      >
         <span>
-          {remaining}/{config.nodeCount}
+          {item?.image ? <img src={item.image} alt="" draggable={false} /> : null}
+          <strong>{config.label}</strong>
         </span>
       </div>
     </Html>
@@ -4763,6 +5061,8 @@ function PlayerAvatar({
     run: null,
     attack: null,
     pickaxeAttack: null,
+    bowAttack: null,
+    magicAttack: null,
     gatherAttack: null,
     gatherPickaxeAttack: null,
     block: null,
@@ -4795,6 +5095,8 @@ function PlayerAvatar({
     FBXLoader,
     PICKAXE_ATTACK_ANIMATION_URL,
   );
+  const bowAttackAnimation = useLoader(FBXLoader, BOW_ATTACK_ANIMATION_URL);
+  const magicAttackAnimation = useLoader(FBXLoader, MAGIC_ATTACK_ANIMATION_URL);
   const blockAnimation = useLoader(FBXLoader, BLOCK_ANIMATION_URL);
   const deathAnimation = useLoader(FBXLoader, DEATH_ANIMATION_URL);
   const { scene: axeScene } = useGLTF(AXE_MODEL_URL);
@@ -4849,8 +5151,10 @@ function PlayerAvatar({
     [
       avatarEquipment.body,
       avatarEquipment.charm,
+      avatarEquipment.charm2,
       avatarEquipment.feet,
       avatarEquipment.head,
+      avatarEquipment.legs,
     ],
   );
   const pickaxeObject = useMemo(() => createMiningPickaxeObject(), []);
@@ -4905,6 +5209,8 @@ function PlayerAvatar({
     const equipmentSlots = {
       body: avatarScene.getObjectByName('chest') || avatarScene,
       charm: avatarScene.getObjectByName('chest') || avatarScene,
+      charm2: avatarScene.getObjectByName('chest') || avatarScene,
+      legs: avatarScene.getObjectByName('hips') || avatarScene.getObjectByName('root') || avatarScene,
       head: avatarScene.getObjectByName('head') || avatarScene,
       'foot.l':
         avatarScene.getObjectByName('foot.l') ??
@@ -4945,9 +5251,9 @@ function PlayerAvatar({
     rightHandSlot.add(pickaxeObject);
     pickaxeRef.current = pickaxeObject;
 
-    torchObject.visible = false;
     applyAxeHandTransform(torchObject, TORCH_HAND_TRANSFORM);
     torchObject.scale.setScalar(TORCH_HAND_SCALE);
+    setHeldTorchVisuals(torchObject, false);
     (leftHandSlot || rightHandSlot).add(torchObject);
     torchRef.current = torchObject;
 
@@ -5022,6 +5328,14 @@ function PlayerAvatar({
     const runClip = movementClips.find((clip) => clip.name === 'Running_B');
     const attackClip = attackAnimation.animations[0];
     const pickaxeAttackClip = pickaxeAttackAnimation.animations[0];
+    const bowAttackClip = createUpperBodyAnimationClip(
+      bowAttackAnimation.animations[0],
+      'Standing_Draw_Arrow_Upper',
+    );
+    const magicAttackClip = createUpperBodyAnimationClip(
+      magicAttackAnimation.animations[0],
+      'Standing_1H_Magic_Attack_Upper',
+    );
     const blockClip = createUpperBodyAnimationClip(
       blockAnimation.animations[0],
       'Standing_Block_Upper',
@@ -5036,6 +5350,10 @@ function PlayerAvatar({
     const attack = attackClip ? mixer.clipAction(attackClip) : null;
     const pickaxeAttack = pickaxeAttackClip
       ? mixer.clipAction(pickaxeAttackClip)
+      : null;
+    const bowAttack = bowAttackClip ? mixer.clipAction(bowAttackClip) : null;
+    const magicAttack = magicAttackClip
+      ? mixer.clipAction(magicAttackClip)
       : null;
     const block = blockClip ? mixer.clipAction(blockClip) : null;
     const death = deathClip ? mixer.clipAction(deathClip) : null;
@@ -5103,6 +5421,20 @@ function PlayerAvatar({
       pickaxeAttack.setEffectiveWeight(0);
       pickaxeAttack.timeScale = 1;
     }
+    if (bowAttack) {
+      bowAttack.enabled = true;
+      bowAttack.clampWhenFinished = false;
+      bowAttack.setLoop(THREE.LoopOnce, 1);
+      bowAttack.setEffectiveWeight(0);
+      bowAttack.timeScale = 1;
+    }
+    if (magicAttack) {
+      magicAttack.enabled = true;
+      magicAttack.clampWhenFinished = false;
+      magicAttack.setLoop(THREE.LoopOnce, 1);
+      magicAttack.setEffectiveWeight(0);
+      magicAttack.timeScale = 1;
+    }
     if (gatherAttack) {
       gatherAttack.enabled = true;
       gatherAttack.clampWhenFinished = false;
@@ -5144,6 +5476,8 @@ function PlayerAvatar({
       run,
       attack,
       pickaxeAttack,
+      bowAttack,
+      magicAttack,
       gatherAttack,
       gatherPickaxeAttack,
       block,
@@ -5160,6 +5494,8 @@ function PlayerAvatar({
         run: null,
         attack: null,
         pickaxeAttack: null,
+        bowAttack: null,
+        magicAttack: null,
         gatherAttack: null,
         gatherPickaxeAttack: null,
         block: null,
@@ -5171,9 +5507,11 @@ function PlayerAvatar({
   }, [
     attackAnimation,
     blockAnimation,
+    bowAttackAnimation,
     deathAnimation,
     attackTimingRef,
     generalClips,
+    magicAttackAnimation,
     movementClips,
     pickaxeAttackAnimation,
   ]);
@@ -5219,6 +5557,8 @@ function PlayerAvatar({
     const isGatherPickaxeTool = visible && activeTool === 'pickaxe';
     const attack = actionsRef.current.attack;
     const pickaxeAttack = actionsRef.current.pickaxeAttack;
+    const bowAttack = actionsRef.current.bowAttack;
+    const magicAttack = actionsRef.current.magicAttack;
     const gatherAttack = actionsRef.current.gatherAttack;
     const gatherPickaxeAttack = actionsRef.current.gatherPickaxeAttack;
     const block = actionsRef.current.block;
@@ -5229,6 +5569,8 @@ function PlayerAvatar({
     ) {
       attack?.stop();
       pickaxeAttack?.stop();
+      bowAttack?.stop();
+      magicAttack?.stop();
       attackStateRef.current = {
         ...attackStateRef.current,
         cancelSequence: attackRequest.cancelSequence,
@@ -5239,13 +5581,22 @@ function PlayerAvatar({
 
     const requestedTool = attackRequest.tool || activeTool;
     const requestedAttack =
-      requestedTool === 'pickaxe' ? pickaxeAttack : attack;
-    const otherAttack = requestedTool === 'pickaxe' ? attack : pickaxeAttack;
+      DOWNWARD_ATTACK_TOOLS.has(requestedTool)
+        ? pickaxeAttack
+        : requestedTool === 'bow' || requestedTool === 'crossbow'
+          ? bowAttack || attack
+          : requestedTool === 'cast'
+            ? magicAttack || attack
+          : attack;
+    const otherAttacks = [attack, pickaxeAttack, bowAttack, magicAttack].filter(
+      (action) => action && action !== requestedAttack,
+    );
+    const requestedRangedAttack = RANGED_ATTACK_TOOLS.has(requestedTool);
     if (
       requestedAttack &&
       attackRequest.sequence !== attackStateRef.current.sequence
     ) {
-      otherAttack?.stop();
+      otherAttacks.forEach((action) => action.stop());
       requestedAttack.reset();
       requestedAttack.setLoop(THREE.LoopOnce, 1);
       requestedAttack.setEffectiveWeight(1);
@@ -5268,7 +5619,14 @@ function PlayerAvatar({
 
     const attackElapsed = clock.elapsedTime - attackStateRef.current.startedAt;
     const activeAttack =
-      attackStateRef.current.tool === 'pickaxe' ? pickaxeAttack : attack;
+      DOWNWARD_ATTACK_TOOLS.has(attackStateRef.current.tool)
+        ? pickaxeAttack
+        : attackStateRef.current.tool === 'bow' ||
+            attackStateRef.current.tool === 'crossbow'
+          ? bowAttack || attack
+          : attackStateRef.current.tool === 'cast'
+            ? magicAttack || attack
+          : attack;
     const attackWeight =
       !isGathering &&
       activeAttack &&
@@ -5288,6 +5646,8 @@ function PlayerAvatar({
       if (isDead && !deathStateRef.current.dead) {
         attack?.stop();
         pickaxeAttack?.stop();
+        bowAttack?.stop();
+        magicAttack?.stop();
         gatherAttack?.stop();
         gatherPickaxeAttack?.stop();
         block?.stop();
@@ -5305,13 +5665,31 @@ function PlayerAvatar({
     }
 
     if (pickaxeAttack) {
-      if (attackStateRef.current.tool !== 'pickaxe' || attackWeight <= 0) {
+      if (
+        !DOWNWARD_ATTACK_TOOLS.has(attackStateRef.current.tool) ||
+        attackWeight <= 0
+      ) {
         pickaxeAttack.stop();
+      }
+    }
+    if (bowAttack) {
+      const bowToolActive =
+        attackStateRef.current.tool === 'bow' ||
+        attackStateRef.current.tool === 'crossbow';
+      if (!bowToolActive || attackWeight <= 0) {
+        bowAttack.stop();
+      }
+    }
+    if (magicAttack) {
+      if (attackStateRef.current.tool !== 'cast' || attackWeight <= 0) {
+        magicAttack.stop();
       }
     }
     if (isDead) {
       attack?.stop();
       pickaxeAttack?.stop();
+      bowAttack?.stop();
+      magicAttack?.stop();
       gatherAttack?.stop();
       gatherPickaxeAttack?.stop();
       gatherAnimationStateRef.current = {
@@ -5321,6 +5699,8 @@ function PlayerAvatar({
     } else if (isGathering) {
       attack?.stop();
       pickaxeAttack?.stop();
+      bowAttack?.stop();
+      magicAttack?.stop();
       const gatherSequence = toolStateRef.current.gatherSwingSequence || 0;
       const shouldResetGatherAction =
         gatherSequence !== gatherAnimationStateRef.current.sequence ||
@@ -5370,10 +5750,15 @@ function PlayerAvatar({
         swordRef.current.visible = isSwordTool;
       }
       if (genericWeaponRef.current) {
+        const weaponTransform =
+          attackWeight > 0 && requestedRangedAttack
+            ? genericWeaponRef.current.userData.shootHandTransform ||
+              GENERIC_RANGED_WEAPON_HAND_TRANSFORMS.default
+            : genericWeaponRef.current.userData.handTransform ||
+              GENERIC_WEAPON_HAND_TRANSFORM;
         applyAxeHandTransform(
           genericWeaponRef.current,
-          genericWeaponRef.current.userData.handTransform ||
-            GENERIC_WEAPON_HAND_TRANSFORM,
+          weaponTransform,
         );
         genericWeaponRef.current.visible = genericWeaponVisible;
       }
@@ -5388,7 +5773,7 @@ function PlayerAvatar({
     }
 
     if (torchRef.current) {
-      torchRef.current.visible = torchVisible;
+      setHeldTorchVisuals(torchRef.current, torchVisible);
       if (torchVisible) {
         const flicker =
           1 +
@@ -5440,16 +5825,40 @@ function PlayerAvatar({
     const walkWeight = locomotionWeight - runWeight;
     const idleWeight = 1 - locomotionWeight;
     const axeAttackWeight =
-      isGathering || attackStateRef.current.tool === 'pickaxe'
+      isGathering ||
+      DOWNWARD_ATTACK_TOOLS.has(attackStateRef.current.tool) ||
+      attackStateRef.current.tool === 'bow' ||
+      attackStateRef.current.tool === 'crossbow' ||
+      (attackStateRef.current.tool === 'cast' && magicAttack)
         ? 0
         : attackWeight;
     const pickaxeAttackWeight =
-      attackStateRef.current.tool === 'pickaxe' && !isGathering
+      DOWNWARD_ATTACK_TOOLS.has(attackStateRef.current.tool) && !isGathering
+        ? attackWeight
+        : 0;
+    const bowAttackWeight =
+      (attackStateRef.current.tool === 'bow' ||
+        attackStateRef.current.tool === 'crossbow') &&
+      !isGathering
+        ? attackWeight
+        : 0;
+    const magicAttackWeight =
+      attackStateRef.current.tool === 'cast' && !isGathering
+        ? attackWeight
+        : 0;
+    const rangedAttackWeight =
+      RANGED_ATTACK_TOOLS.has(attackStateRef.current.tool) &&
+      attackStateRef.current.tool !== 'bow' &&
+      attackStateRef.current.tool !== 'crossbow' &&
+      (attackStateRef.current.tool !== 'cast' || !magicAttack) &&
+      !isGathering
         ? attackWeight
         : 0;
     const clipAttackWeight = Math.max(
       axeAttackWeight,
       pickaxeAttackWeight,
+      bowAttackWeight,
+      magicAttackWeight,
       gatherAxeWeight,
       gatherPickaxeWeight,
     );
@@ -5462,12 +5871,15 @@ function PlayerAvatar({
     actionsRef.current.run?.setEffectiveWeight(runWeight * baseWeight);
     attack?.setEffectiveWeight(axeAttackWeight);
     pickaxeAttack?.setEffectiveWeight(pickaxeAttackWeight);
+    bowAttack?.setEffectiveWeight(bowAttackWeight);
+    magicAttack?.setEffectiveWeight(magicAttackWeight);
     gatherAttack?.setEffectiveWeight(gatherAxeWeight);
     gatherPickaxeAttack?.setEffectiveWeight(gatherPickaxeWeight);
     block?.setEffectiveWeight(blockActionWeight);
     death?.setEffectiveWeight(deathWeight);
     mixerRef.current.update(delta);
     if (!block) applyBlockingPose(rig, blockBlendRef.current);
+    applyRangedAttackPose(rig, rangedAttackWeight);
     const strideRate = THREE.MathUtils.lerp(12, 16, runBlendRef.current);
     const stride = Math.sin(clock.elapsedTime * strideRate);
     avatarRootRef.current.position.y =
@@ -6042,6 +6454,360 @@ function CombatFloaters({ items, playerRef }) {
   ));
 }
 
+const COOL_FIRE_PARTICLE_COUNT = 12;
+const COOL_FIRE_TAIL_PARTICLE_COUNT = 8;
+const SPARK_PROJECTILE_POOL_SIZE = 6;
+const skipProjectileRaycast = () => null;
+let cachedFireSpriteTexture = null;
+let cachedFireMaterials = null;
+
+function getCoolFireSpriteTexture() {
+  if (cachedFireSpriteTexture) return cachedFireSpriteTexture;
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, 'rgba(255,255,255,1)');
+  gradient.addColorStop(0.16, 'rgba(255,226,144,0.98)');
+  gradient.addColorStop(0.46, 'rgba(255,74,46,0.58)');
+  gradient.addColorStop(0.78, 'rgba(128,17,8,0.18)');
+  gradient.addColorStop(1, 'rgba(52,4,0,0)');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 64);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  cachedFireSpriteTexture = texture;
+  return texture;
+}
+
+function getCoolFireMaterials() {
+  if (cachedFireMaterials) return cachedFireMaterials;
+  const texture = getCoolFireSpriteTexture();
+  cachedFireMaterials = {
+    core: new THREE.SpriteMaterial({
+      blending: THREE.AdditiveBlending,
+      color: '#ffd36c',
+      depthWrite: false,
+      map: texture,
+      opacity: 0.86,
+      toneMapped: false,
+      transparent: true,
+    }),
+    flame: new THREE.SpriteMaterial({
+      blending: THREE.AdditiveBlending,
+      color: '#ff6b25',
+      depthWrite: false,
+      map: texture,
+      opacity: 0.72,
+      toneMapped: false,
+      transparent: true,
+    }),
+    halo: new THREE.SpriteMaterial({
+      blending: THREE.AdditiveBlending,
+      color: '#ff3b1f',
+      depthWrite: false,
+      map: texture,
+      opacity: 0.26,
+      toneMapped: false,
+      transparent: true,
+    }),
+    tail: new THREE.SpriteMaterial({
+      blending: THREE.AdditiveBlending,
+      color: '#d53514',
+      depthWrite: false,
+      map: texture,
+      opacity: 0.42,
+      toneMapped: false,
+      transparent: true,
+    }),
+  };
+  return cachedFireMaterials;
+}
+
+function createCoolFireParticles(count, tail = false) {
+  const particles = [];
+  const color = new THREE.Color();
+
+  for (let index = 0; index < count; index += 1) {
+    const progress = count <= 1 ? 0 : index / (count - 1);
+    const angle = index * 2.399963 + progress * Math.PI;
+    const body = Math.sin(progress * Math.PI);
+    const swirl = tail
+      ? THREE.MathUtils.lerp(2.5, 12, body)
+      : THREE.MathUtils.lerp(4.5, 17.5, body);
+    const flicker = Math.sin(index * 12.9898) * 0.5 + 0.5;
+    const height = (flicker - 0.5) * (tail ? 3.8 : 5.4);
+    const length = tail
+      ? THREE.MathUtils.lerp(-16, -58, progress)
+      : THREE.MathUtils.lerp(22, -19, progress);
+
+    color.setHSL(
+      THREE.MathUtils.lerp(0.02, 0.105, tail ? progress : flicker * 0.65),
+      THREE.MathUtils.lerp(1, 0.86, progress),
+      THREE.MathUtils.lerp(0.7, 0.38, progress),
+    );
+    particles.push({
+      basePosition: [
+        Math.cos(angle) * swirl * (0.58 + flicker * 0.52),
+        height + (flicker - 0.5) * (tail ? 3.2 : 4.6),
+        length + Math.sin(angle) * swirl * 0.42,
+      ],
+      color: color.getStyle(),
+      opacity: tail
+        ? THREE.MathUtils.lerp(0.38, 0.04, progress)
+        : THREE.MathUtils.lerp(0.94, 0.22, progress),
+      seed: index * 17.19 + flicker * 9.7,
+      size: tail
+        ? THREE.MathUtils.lerp(10, 3.2, progress)
+        : THREE.MathUtils.lerp(18, 7.4, progress),
+    });
+  }
+
+  return particles;
+}
+
+const COOL_FIRE_FLAME_PARTICLES = createCoolFireParticles(COOL_FIRE_PARTICLE_COUNT);
+const COOL_FIRE_TAIL_PARTICLES = createCoolFireParticles(
+  COOL_FIRE_TAIL_PARTICLE_COUNT,
+  true,
+);
+
+function CoolFireProjectile() {
+  const rootRef = useRef(null);
+  const haloRef = useRef(null);
+  const coreRef = useRef(null);
+  const flameRef = useRef(null);
+  const tailRef = useRef(null);
+  const materials = useMemo(getCoolFireMaterials, []);
+
+  useFrame(({ clock }) => {
+    const time = clock.elapsedTime;
+    const pulse = 0.5 + Math.sin(time * 19) * 0.5;
+    if (rootRef.current) {
+      rootRef.current.rotation.z = Math.sin(time * 8.5) * 0.18;
+      rootRef.current.scale.setScalar(0.92 + pulse * 0.12);
+    }
+    if (haloRef.current) {
+      haloRef.current.scale.setScalar(1.02 + pulse * 0.22);
+    }
+    if (coreRef.current) {
+      coreRef.current.scale.setScalar(0.82 + pulse * 0.28);
+    }
+    if (flameRef.current) {
+      flameRef.current.rotation.z = time * 2.2;
+      flameRef.current.rotation.y = Math.sin(time * 5.2) * 0.26;
+    }
+    if (tailRef.current) {
+      tailRef.current.rotation.z = -time * 1.45;
+      tailRef.current.position.z = Math.sin(time * 11) * 1.4;
+    }
+    for (const group of [flameRef.current, tailRef.current]) {
+      if (!group) continue;
+      group.children.forEach((sprite) => {
+        const base = sprite.userData.basePosition;
+        const wave = 0.5 + Math.sin(time * 10 + sprite.userData.seed) * 0.5;
+        sprite.position.set(
+          base[0] + Math.sin(time * 9 + sprite.userData.seed) * 0.8,
+          base[1] + wave * 2.1,
+          base[2] + Math.cos(time * 7 + sprite.userData.seed) * 0.95,
+        );
+        sprite.scale.setScalar(sprite.userData.size * (0.86 + wave * 0.34));
+      });
+    }
+  });
+
+  return (
+    <group ref={rootRef}>
+      <sprite
+        ref={haloRef}
+        material={materials.halo}
+        position={[0, 3, 9]}
+        raycast={skipProjectileRaycast}
+        scale={[38, 38, 38]}
+      />
+      <sprite
+        ref={coreRef}
+        material={materials.core}
+        position={[0, 4, 14]}
+        raycast={skipProjectileRaycast}
+        scale={[18, 18, 18]}
+      />
+      <group ref={flameRef}>
+        {COOL_FIRE_FLAME_PARTICLES.map((particle, index) => (
+          <sprite
+            key={`flame-${index}`}
+            material={materials.flame}
+            position={particle.basePosition}
+            raycast={skipProjectileRaycast}
+            scale={[particle.size, particle.size, particle.size]}
+            userData={particle}
+          />
+        ))}
+      </group>
+      <group ref={tailRef}>
+        {COOL_FIRE_TAIL_PARTICLES.map((particle, index) => (
+          <sprite
+            key={`tail-${index}`}
+            material={materials.tail}
+            position={particle.basePosition}
+            raycast={skipProjectileRaycast}
+            scale={[particle.size, particle.size, particle.size]}
+            userData={particle}
+          />
+        ))}
+      </group>
+    </group>
+  );
+}
+
+function SparkProjectileSlot({ projectilesRef, slotIndex }) {
+  const rootRef = useRef(null);
+  const renderPositionRef = useRef(new THREE.Vector3());
+  const currentProjectileIdRef = useRef(null);
+
+  useFrame((_, delta) => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    let sparkIndex = 0;
+    let projectile = null;
+    for (const candidate of projectilesRef.current) {
+      if (candidate.profile?.type !== 'spark') continue;
+      if (sparkIndex === slotIndex) {
+        projectile = candidate;
+        break;
+      }
+      sparkIndex += 1;
+    }
+
+    if (!projectile) {
+      root.scale.setScalar(0);
+      currentProjectileIdRef.current = null;
+      return;
+    }
+
+    root.scale.setScalar(1);
+    if (currentProjectileIdRef.current !== projectile.id) {
+      currentProjectileIdRef.current = projectile.id;
+      renderPositionRef.current.copy(projectile.position);
+    } else {
+      const alpha = 1 - Math.exp(-72 * delta);
+      renderPositionRef.current.lerp(projectile.position, alpha);
+    }
+    root.position.copy(renderPositionRef.current);
+    root.rotation.y = projectile.facing || 0;
+  });
+
+  return (
+    <group ref={rootRef} scale={0}>
+      <CoolFireProjectile />
+    </group>
+  );
+}
+
+function SparkProjectileGlowLight({ projectilesRef }) {
+  const lightRef = useRef(null);
+  const lightPositionRef = useRef(new THREE.Vector3());
+
+  useFrame((_, delta) => {
+    const light = lightRef.current;
+    if (!light) return;
+
+    const projectile = projectilesRef.current.find(
+      (candidate) => candidate.profile?.type === 'spark',
+    );
+    const targetIntensity = projectile ? 3.8 : 0;
+    light.intensity = THREE.MathUtils.damp(
+      light.intensity,
+      targetIntensity,
+      projectile ? 18 : 24,
+      delta,
+    );
+    if (!projectile) return;
+
+    lightPositionRef.current.copy(projectile.position);
+    lightPositionRef.current.y += 18;
+    light.position.copy(lightPositionRef.current);
+  });
+
+  return (
+    <pointLight
+      ref={lightRef}
+      color='#ff6a26'
+      decay={1.18}
+      distance={210}
+      intensity={0}
+      visible
+    />
+  );
+}
+
+function SparkProjectilePool({ projectilesRef }) {
+  return (
+    <>
+      <SparkProjectileGlowLight projectilesRef={projectilesRef} />
+      {Array.from({ length: SPARK_PROJECTILE_POOL_SIZE }, (_, index) => (
+        <SparkProjectileSlot
+          key={`spark-projectile-slot-${index}`}
+          projectilesRef={projectilesRef}
+          slotIndex={index}
+        />
+      ))}
+    </>
+  );
+}
+
+function WeaponProjectile({ projectile }) {
+  const rootRef = useRef(null);
+  const renderPositionRef = useRef(projectile.position.clone());
+  const color = projectile.weapon?.color || '#f0d27a';
+
+  useFrame((_, delta) => {
+    if (!rootRef.current) return;
+    const alpha = 1 - Math.exp(-72 * delta);
+    renderPositionRef.current.lerp(projectile.position, alpha);
+    rootRef.current.position.copy(renderPositionRef.current);
+    rootRef.current.rotation.y = projectile.facing || 0;
+  });
+
+  return (
+    <group ref={rootRef} position={projectile.position} rotation-y={projectile.facing || 0}>
+      <mesh position={[0, 0, 0]} rotation-x={Math.PI / 2}>
+        <cylinderGeometry args={[1.25, 1.25, 21, 5]} />
+        <meshStandardMaterial color={color} roughness={0.58} />
+      </mesh>
+      <mesh position={[0, 0, 11.5]} rotation-x={Math.PI / 2}>
+        <coneGeometry args={[3.1, 7, 6]} />
+        <meshStandardMaterial color='#f6f2dd' metalness={0.08} roughness={0.42} />
+      </mesh>
+      {projectile.profile?.type === 'arrow' && (
+        <mesh position={[0, 0, -12]} rotation-x={Math.PI / 2}>
+          <coneGeometry args={[3.2, 5.5, 4]} />
+          <meshStandardMaterial color='#d9edd0' roughness={0.64} />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+function WeaponProjectiles({ projectilesRef, version }) {
+  void version;
+  const physicalProjectiles = projectilesRef.current.filter(
+    (projectile) => projectile.profile?.type !== 'spark',
+  );
+  return (
+    <>
+      <SparkProjectilePool projectilesRef={projectilesRef} />
+      {physicalProjectiles.map((projectile) => (
+        <WeaponProjectile key={projectile.id} projectile={projectile} />
+      ))}
+    </>
+  );
+}
+
 function Creature({
   attackableRegistryRef,
   combatState,
@@ -6122,7 +6888,7 @@ function Creature({
   const handlePointerDown = (event) => {
     if (event.button !== 0) return;
     event.stopPropagation();
-    onAttack(event.point.x, event.point.z);
+    onAttack(event.point.x, event.point.z, { targetId: creature.id });
   };
 
   const showHealth = combatState.hp < combatState.maxHp;
@@ -7559,6 +8325,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
   const playerHealth = useGameUiStore((state) => state.health.current);
   const playerDead = playerHealth <= 0;
   const [combatFloaters, setCombatFloaters] = useState([]);
+  const [projectileVersion, setProjectileVersion] = useState(0);
   const remotePlayers = useGameRuntimeStore((state) => state.remotePlayers);
   const inventoryWood = useGameUiStore((state) => state.inventory.wood || 0);
   const selectedBuildIndex = useGameUiStore(
@@ -7609,6 +8376,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
   const attackCooldownUntilRef = useRef(0);
   const creatureAttackCooldownsRef = useRef({});
   const pendingWeaponAttackRef = useRef(null);
+  const weaponProjectilesRef = useRef([]);
   const gatherTargetRef = useRef(null);
   const gatherParticlesRef = useRef([]);
   const gatherHudSyncRef = useRef({ lastAt: 0, progress: -1 });
@@ -7624,6 +8392,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     createCreatureCombatStates,
   );
   const [activeResourceId, setActiveResourceId] = useState(null);
+  const [hoveredResourceId, setHoveredResourceId] = useState(null);
   const [buildPreview, setBuildPreview] = useState(null);
   const [destroyModifier, setDestroyModifier] = useState(false);
   const resourceStatesRef = useRef(resourceStates);
@@ -7646,6 +8415,12 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     if (!isGameInputReady()) return;
     resourceCommandRef.current?.(resource);
   }, [inputReady]);
+  const handleResourceHover = useCallback((resourceId, hovered) => {
+    setHoveredResourceId((current) => {
+      if (hovered) return resourceId;
+      return current === resourceId ? null : current;
+    });
+  }, []);
   const applyRuntimePlayerPosition = useCallback(() => {
     const playerObject = playerRef.current;
     if (!playerObject || hydratedPlayerObjectRef.current === playerObject) {
@@ -7800,6 +8575,8 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     isPlayerMovingRef.current = false;
     gatherTargetRef.current = null;
     pendingWeaponAttackRef.current = null;
+    weaponProjectilesRef.current = [];
+    setProjectileVersion((version) => version + 1);
     toolStateRef.current.axeVisible = false;
     toolStateRef.current.gathering = false;
     if (playerRef.current) moveTargetRef.current.copy(playerRef.current.position);
@@ -7825,6 +8602,8 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     isPlayerMovingRef.current = false;
     gatherTargetRef.current = null;
     pendingWeaponAttackRef.current = null;
+    weaponProjectilesRef.current = [];
+    setProjectileVersion((version) => version + 1);
     toolStateRef.current.axeVisible = false;
     toolStateRef.current.gathering = false;
     if (playerRef.current) moveTargetRef.current.copy(playerRef.current.position);
@@ -8063,8 +8842,6 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     }
 
     moveTargetRef.current.set(clampedX, 0, clampedZ);
-    cancelAttack();
-    pendingWeaponAttackRef.current = null;
 
     const command = moveTargetCommandRef.current;
     const now =
@@ -8242,7 +9019,8 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     });
 
     if (sent) {
-      setHudActionLine(`${attack.weapon.name} swing sent at ${entry.name || 'Traveler'}.`);
+      const verb = isRangedAttackProfile(attack.profile) ? 'shot' : 'swing';
+      setHudActionLine(`${attack.weapon.name} ${verb} sent at ${entry.name || 'Traveler'}.`);
       return;
     }
 
@@ -8250,10 +9028,152 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     setHudActionLine('PvP server unavailable.');
   };
 
+  const bumpProjectileVersion = () => {
+    setProjectileVersion((version) => version + 1);
+  };
+
+  const projectileLaunchOffset = (attack) => {
+    const profileType = attack.profile?.type;
+    const baseOffset =
+      profileType === 'spark' ? 42 : profileType === 'arrow' ? 34 : 26;
+    const aimDistance = THREE.MathUtils.clamp(
+      Number(attack.aimDistance) || attack.profile?.range || baseOffset,
+      0,
+      attack.profile?.range || baseOffset,
+    );
+    return Math.min(baseOffset, aimDistance * 0.32);
+  };
+
+  const spawnWeaponProjectile = (attack) => {
+    const direction = new THREE.Vector3().subVectors(
+      attack.target,
+      attack.origin,
+    );
+    direction.y = 0;
+    if (direction.lengthSq() < 0.001) {
+      direction.set(Math.sin(attack.facing), 0, Math.cos(attack.facing));
+    }
+    direction.normalize();
+
+    const launchOffset = projectileLaunchOffset(attack);
+    const launch = attack.origin.clone().addScaledVector(direction, launchOffset);
+    launch.y = getTerrainHeight(launch.x, launch.z) + PROJECTILE_LAUNCH_HEIGHT;
+    const target = attack.target.clone();
+    target.y = getTerrainHeight(target.x, target.z) + PROJECTILE_HIT_HEIGHT;
+    const maxDistance = Math.max(40, attack.profile.range - launchOffset);
+    const facing = Math.atan2(direction.x, direction.z);
+    const projectile = {
+      ...attack,
+      direction,
+      facing,
+      id: `projectile-${Date.now()}-${Math.floor(Math.random() * 100000)}`,
+      maxDistance,
+      position: launch,
+      target,
+      traveled: 0,
+    };
+    weaponProjectilesRef.current = [...weaponProjectilesRef.current, projectile];
+    if (attack.profile.type !== 'spark') bumpProjectileVersion();
+  };
+
+  const resolveProjectileHit = (projectile, hit) => {
+    if (hit.type === 'creature') {
+      damageCreature(hit, projectile);
+      return;
+    }
+    sendPvpWeaponAttack(hit, projectile);
+  };
+
+  const updateWeaponProjectiles = (delta) => {
+    const projectiles = weaponProjectilesRef.current;
+    if (!projectiles.length) return;
+
+    let changedNonSpark = false;
+    const survivors = [];
+    for (const projectile of projectiles) {
+      const remaining = projectile.maxDistance - projectile.traveled;
+      if (remaining <= 0) {
+        if (projectile.profile?.type !== 'spark') changedNonSpark = true;
+        continue;
+      }
+
+      const projectileDelta = Math.min(delta, 1 / 45);
+      const travel = Math.min(
+        remaining,
+        projectile.profile.projectileSpeed * projectileDelta,
+      );
+      const previous = projectile.position.clone();
+      projectile.position.addScaledVector(projectile.direction, travel);
+      projectile.position.y = THREE.MathUtils.lerp(
+        previous.y,
+        projectile.target.y,
+        travel / Math.max(travel, remaining),
+      );
+      projectile.traveled += travel;
+
+      const hit = findProjectileHit(
+        attackableRegistryRef.current,
+        creatureStatesRef.current,
+        projectile,
+        previous,
+        projectile.position,
+      );
+      if (hit) {
+        resolveProjectileHit(projectile, hit);
+        if (projectile.profile?.type !== 'spark') changedNonSpark = true;
+        continue;
+      }
+
+      if (projectile.traveled >= projectile.maxDistance - 0.01) {
+        if (projectile.targetId) {
+          emitCombatFloater({
+            kind: 'miss',
+            position: projectile.position,
+            text: 'Miss',
+          });
+          setHudActionLine(`Miss: ${projectile.weapon.name} shot missed.`);
+        }
+        if (projectile.profile?.type !== 'spark') changedNonSpark = true;
+        continue;
+      }
+
+      survivors.push(projectile);
+    }
+
+    weaponProjectilesRef.current = survivors;
+    if (changedNonSpark) bumpProjectileVersion();
+  };
+
+  const refreshAttackForCurrentPlayerPosition = (attack) => {
+    if (!attack || !playerRef.current) return attack;
+    const origin = playerRef.current.position.clone();
+    const facing = playerRef.current.rotation.y || attack.facing || 0;
+    const aimDistance = THREE.MathUtils.clamp(
+      Number(attack.aimDistance) || attack.profile.range,
+      1,
+      attack.profile.range,
+    );
+    const target = new THREE.Vector3(
+      origin.x + Math.sin(facing) * aimDistance,
+      origin.y,
+      origin.z + Math.cos(facing) * aimDistance,
+    );
+    target.y = getTerrainHeight(target.x, target.z);
+    return { ...attack, facing, origin, target };
+  };
+
   const resolvePendingWeaponAttack = () => {
-    const attack = pendingWeaponAttackRef.current;
-    if (!attack || performance.now() < attack.impactAt) return;
+    const pendingAttack = pendingWeaponAttackRef.current;
+    if (!pendingAttack || performance.now() < pendingAttack.impactAt) return;
     pendingWeaponAttackRef.current = null;
+    const attack = refreshAttackForCurrentPlayerPosition(pendingAttack);
+
+    if (isRangedAttackProfile(attack.profile)) {
+      spawnWeaponProjectile(attack);
+      playSfx(attack.profile.sfx, 0.8);
+      setHudActionLine(`${attack.weapon.name} fired.`);
+      return;
+    }
 
     const hit = findWeaponAttackHit(
       attackableRegistryRef.current,
@@ -8350,50 +9270,70 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
       if (Math.hypot(dx, dz) > 0.001) {
         playerRef.current.rotation.y = Math.atan2(dx, dz);
       }
-      moveTargetRef.current.copy(playerRef.current.position);
     }
 
     gatherTargetRef.current = null;
     if (activeResourceId) setActiveResourceId(null);
     toolStateRef.current.axeVisible = false;
-    toolStateRef.current.tool = attackWeapon.id === 'sword' ? 'sword' : 'weapon';
+    const actionTool = weaponActionTool(attackWeapon);
+    toolStateRef.current.tool = actionTool;
     toolStateRef.current.gathering = false;
     setGatherHud(null);
-    isPlayerMovingRef.current = false;
-    if (ringRef.current) ringRef.current.visible = false;
 
     const origin = playerRef.current
       ? playerRef.current.position.clone()
       : new THREE.Vector3(0, 0, 0);
     const facing = playerRef.current?.rotation.y || 0;
+    const rawTarget = new THREE.Vector3(x, getTerrainHeight(x, z), z);
+    const target = rawTarget.clone();
+    const targetOffset = new THREE.Vector3().subVectors(target, origin);
+    targetOffset.y = 0;
+    const targetDistance = targetOffset.length();
+    if (targetDistance > profile.range && targetDistance > 0.001) {
+      target.copy(origin).addScaledVector(targetOffset.normalize(), profile.range);
+      target.y = getTerrainHeight(target.x, target.z);
+    }
+    const aimDistance = Math.min(
+      profile.range,
+      targetDistance > 0.001 ? targetDistance : profile.range,
+    );
+
     attackCooldownUntilRef.current = nowMs + profile.cooldownMs;
-    pendingWeaponAttackRef.current = {
+    const attack = {
+      aimDistance,
       weapon: attackWeapon,
       profile,
       origin,
       facing,
       impactAt: nowMs + profile.impactMs,
-      target: new THREE.Vector3(x, getTerrainHeight(x, z), z),
+      target,
       targetId: options.targetId || null,
     };
+    pendingWeaponAttackRef.current = attack;
 
     attackRequestRef.current = {
       sequence: attackRequestRef.current.sequence + 1,
       cancelSequence: attackRequestRef.current.cancelSequence,
       duration: options.duration || profile.animationDuration,
       trimEnd: options.trimEnd || 0,
-      tool: attackWeapon.id === 'sword' ? 'sword' : 'weapon',
+      tool: actionTool,
       x,
       z,
     };
     const runtime = gameRuntimeStore.getState();
     runtime.setLocalPresence({
       actionState: 'attack',
-      actionTool: attackWeapon.id === 'sword' ? 'sword' : 'weapon',
+      actionTool,
       actionSequence: (runtime.localPresence.actionSequence || 0) + 1,
     });
-    playSfx(profile.sfx, 0.8);
-    setHudActionLine(`${attackWeapon.name} attack.`);
+    if (!isRangedAttackProfile(profile)) {
+      playSfx(profile.sfx, 0.8);
+    }
+    setHudActionLine(
+      isRangedAttackProfile(profile)
+        ? `${attackWeapon.name} drawing...`
+        : `${attackWeapon.name} attack.`,
+    );
   };
 
   const startGatherSwing = (target, config, elapsedTime) => {
@@ -8539,7 +9479,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
   };
   resourceCommandRef.current = commandGatherResource;
 
-	  useFrame(({ clock }) => {
+	  useFrame(({ clock }, delta) => {
     if (
       !playerPositionAppliedRef.current ||
       hydratedPlayerObjectRef.current !== playerRef.current
@@ -8548,6 +9488,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
 	    }
     if (!isGameInputReady()) return;
 
+    updateWeaponProjectiles(delta);
     resolvePendingWeaponAttack();
     resolveCreatureAttacks();
     if (
@@ -8773,6 +9714,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
                     scale={tree.scale}
                     rotationY={tree.rotationY}
                     onResourceCommand={handleResourceCommand}
+                    onResourceHover={handleResourceHover}
                   />
                 </Suspense>
               ) : (
@@ -8784,6 +9726,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
                     scale={tree.scale}
                     rotationY={tree.rotationY}
                     onResourceCommand={handleResourceCommand}
+                    onResourceHover={handleResourceHover}
                   />
                 </Suspense>
               )}
@@ -8809,6 +9752,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
                   position={fallbackPosition}
                   scale={fallbackScale}
                   onResourceCommand={handleResourceCommand}
+                  onResourceHover={handleResourceHover}
                 />
               ) : (
                 <Suspense
@@ -8818,6 +9762,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
                       position={fallbackPosition}
                       scale={fallbackScale}
                       onResourceCommand={handleResourceCommand}
+                      onResourceHover={handleResourceHover}
                     />
                   }
                 >
@@ -8829,6 +9774,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
                     rotationY={rock.rotationY}
                     scale={rock.scale}
                     onResourceCommand={handleResourceCommand}
+                    onResourceHover={handleResourceHover}
                   />
                 </Suspense>
               )}
@@ -8851,6 +9797,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
                     rotationY={plant.rotationY}
                     scale={plant.scale}
                     onResourceCommand={handleResourceCommand}
+                    onResourceHover={handleResourceHover}
                   />
                 </Suspense>
               )}
@@ -8861,6 +9808,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     ),
     [
       handleResourceCommand,
+      handleResourceHover,
       resourceStates,
       visiblePlantResourcePoints,
       visibleRockPoints,
@@ -8875,8 +9823,12 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
           const treeId = tree.id ?? tree.file;
           return (
             <ResourceNodeOverlay
-              active={activeResourceId === treeId}
+              active={
+                activeResourceId === treeId || hoveredResourceId === treeId
+              }
+              id={treeId}
               key={`resource-overlay-${treeId}`}
+              onResourceHover={handleResourceHover}
               position={positionOnTerrain(tree.position)}
               state={resourceStates[treeId]}
               type='tree'
@@ -8885,8 +9837,12 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
         })}
         {visibleRockPoints.map((rock) => (
           <ResourceNodeOverlay
-            active={activeResourceId === rock.id}
+            active={
+              activeResourceId === rock.id || hoveredResourceId === rock.id
+            }
+            id={rock.id}
             key={`resource-overlay-${rock.id}`}
+            onResourceHover={handleResourceHover}
             position={positionOnTerrain(rock.position)}
             state={resourceStates[rock.id]}
             type='stone'
@@ -8894,8 +9850,12 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
         ))}
         {visiblePlantResourcePoints.map((plant) => (
           <ResourceNodeOverlay
-            active={activeResourceId === plant.id}
+            active={
+              activeResourceId === plant.id || hoveredResourceId === plant.id
+            }
+            id={plant.id}
             key={`resource-overlay-${plant.id}`}
+            onResourceHover={handleResourceHover}
             position={positionOnTerrain(plant.position)}
             state={resourceStates[plant.id]}
             type={plant.type}
@@ -8905,6 +9865,8 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
     ),
     [
       activeResourceId,
+      handleResourceHover,
+      hoveredResourceId,
       resourceStates,
       visiblePlantResourcePoints,
       visibleRockPoints,
@@ -8964,6 +9926,10 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
         </Suspense>
         <DestinationRing ringRef={ringRef} />
         <CombatFloaters items={combatFloaters} playerRef={playerRef} />
+        <WeaponProjectiles
+          projectilesRef={weaponProjectilesRef}
+          version={projectileVersion}
+        />
         <SceneRuntime
           buildings={buildings}
           cameraOffset={cameraOffset}
@@ -8988,6 +9954,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
       combatFloaters,
       creatureStates,
       equippedWeaponId,
+      equipment,
       initialPlayerPosition,
       inputReady,
       resourceStates,
@@ -8995,6 +9962,7 @@ function SceneContent({ cameraOffset, qualityConfig, settings }) {
       torchEquipped,
       visibleProps,
       visibleWindow,
+      projectileVersion,
     ],
   );
 

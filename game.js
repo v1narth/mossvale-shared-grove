@@ -1,5 +1,6 @@
 const canvas = document.getElementById("world");
-const ctx = canvas.getContext("2d");
+const ctx = canvas?.getContext("2d") ?? null;
+const has2dCanvas = Boolean(canvas && ctx);
 
 const ui = {
   online: document.getElementById("onlineCount"),
@@ -80,6 +81,7 @@ const PLAYER_ID_KEY = "mossvale_player_id";
 const INV_KEY = "mossvale_inventory_v1";
 const INV_LAYOUT_KEY = "mossvale_inventory_layout_v1";
 const QUICKBAR_KEY = "mossvale_quickbar_v1";
+const QUICKBAR_SELECTION_KEY = "mossvale_quickbar_selection_v1";
 const BUILD_KEY = "mossvale_buildings_v1";
 const PLANTED_KEY = "mossvale_planted_resources_v1";
 const WEAPON_KEY = "mossvale_weapon_unlocks_v1";
@@ -117,6 +119,7 @@ let dragPayload = null;
 let combatTargetId = null;
 let combatTargetVisibleUntil = 0;
 let suppressMouseUntil = 0;
+let externalGatherHud = null;
 
 const HELD_MOVE_LEAD = 280;
 const TOUCH_DRAG_THRESHOLD = 10;
@@ -136,7 +139,8 @@ const camera = { x: WORLD.w / 2, y: WORLD.h / 2, zoom: DESKTOP_CAMERA_ZOOM };
 const inventory = normalizeInventory(loadJson(INV_KEY, emptyInventory()));
 const resourceState = loadJson(RESOURCE_VERSION, {});
 const buildings = loadJson(BUILD_KEY, []);
-let equippedItems = loadJson(EQUIPMENT_KEY, {});
+const savedEquipment = loadJson(EQUIPMENT_KEY, null);
+let equippedItems = savedEquipment || { weapon: "stick" };
 const others = new Map();
 const online = {
   client: null,
@@ -166,6 +170,7 @@ const floatText = [];
 const projectiles = [];
 const droppedLoot = [];
 const bots = [];
+const AUDIO_ENABLED = false;
 const audioSupport = window.AudioContext || window.webkitAudioContext;
 let audio = null;
 const DEFAULT_SOUND_RANGE = 760;
@@ -182,6 +187,7 @@ const NETWORK_SMOOTHING_SPEED = 18;
 const NETWORK_SNAP_DISTANCE = 520;
 
 function ensureAudio() {
+  if (!AUDIO_ENABLED) return null;
   if (!audioSupport) return null;
   if (!audio) {
     const ctx = new audioSupport();
@@ -212,6 +218,15 @@ function ensureAudio() {
 }
 
 function syncAudioState() {
+  if (!AUDIO_ENABLED) {
+    stopMusicLoop();
+    if (audio) {
+      const at = audio.ctx.currentTime;
+      audio.master.gain.cancelScheduledValues(at);
+      audio.master.gain.setValueAtTime(0, at);
+    }
+    return;
+  }
   if (!audio) return;
   const at = audio.ctx.currentTime;
   audio.master.gain.cancelScheduledValues(at);
@@ -224,6 +239,7 @@ function syncAudioState() {
 }
 
 function startMusicLoop() {
+  if (!AUDIO_ENABLED) return;
   if (!audio || audio.musicTimer) return;
   audio.nextMusicAt = Math.max(audio.ctx.currentTime + 0.04, audio.nextMusicAt || 0);
   audio.musicTimer = setInterval(scheduleMusic, 120);
@@ -237,6 +253,7 @@ function stopMusicLoop() {
 }
 
 function scheduleMusic() {
+  if (!AUDIO_ENABLED) return;
   if (!audio || paused) return;
   const lookahead = audio.ctx.currentTime + 1.1;
   const beat = 60 / 86;
@@ -295,6 +312,7 @@ function scheduleMusic() {
 }
 
 function playSfx(name, intensity = 1) {
+  if (!AUDIO_ENABLED) return;
   const system = audio || ensureAudio();
   if (!system || (paused && name !== "ui")) return;
   intensity = clamp(intensity, 0, 1.4);
@@ -351,6 +369,7 @@ function playSfx(name, intensity = 1) {
 }
 
 function playWorldSfx(name, x, y, intensity = 1, range = DEFAULT_SOUND_RANGE) {
+  if (!AUDIO_ENABLED) return;
   if (!audio || x == null || y == null) return;
   const falloff = soundFalloff(x, y, range);
   if (falloff <= 0) return;
@@ -366,6 +385,7 @@ function soundFalloff(x, y, range = DEFAULT_SOUND_RANGE) {
 }
 
 function announceSfx(name, x, y, intensity = 1, range = DEFAULT_SOUND_RANGE) {
+  if (!AUDIO_ENABLED) return;
   announce("sfx", { sfx: { name, x, y, intensity, range } });
 }
 
@@ -528,6 +548,7 @@ const itemDefs = [
   { key: "cloth", name: "Cloth", singular: "cloth", plural: "cloth", className: "cloth", type: "Material", level: 1, desc: "Woven cotton cloth. Used for bandages, bowstrings, padding, and travel gear." },
   { key: "petal_extract", name: "Petal Extract", singular: "petal extract", plural: "petal extract", className: "petal-extract", type: "Material", level: 2, desc: "Pressed glowflower essence. Used for utility craft, charms, and energy weapons." },
   { key: "bandage", name: "Bandage", singular: "bandage", plural: "bandages", className: "bandage", type: "Consumable", displayType: "Consumable", level: 1, desc: "A clean cotton wrap with petals tucked in. Use it to restore 2 health.", useLabel: "use bandage" },
+  { key: "torch", name: "Torch", singular: "torch", plural: "torches", className: "torch", type: "Utility", displayType: "Utility", level: 1, slot: "offhand", desc: "A pitch-wrapped branch that throws warm light around you. Equip it in your offhand to brighten the nearby grove.", useLabel: "equip" },
   { key: "cloth_cap", name: "Cloth Cap", singular: "cloth cap", plural: "cloth caps", className: "armor-head", type: "Armor", displayType: "Armor", level: 1, slot: "head", hpBonus: 1, desc: "A soft cap that keeps your head out of trouble. Equip for +1 max health.", useLabel: "equip" },
   { key: "padded_vest", name: "Padded Vest", singular: "padded vest", plural: "padded vests", className: "armor-body", type: "Armor", displayType: "Armor", level: 2, slot: "body", hpBonus: 2, desc: "Layered cloth padding over a small wood frame. Equip for +2 max health.", useLabel: "equip" },
   { key: "wooden_shield", name: "Wooden Shield", singular: "wooden shield", plural: "wooden shields", className: "armor-offhand", type: "Armor", displayType: "Armor", level: 2, slot: "offhand", hpBonus: 1, desc: "A blocky offhand guard made from refined wood. Equip for +1 max health.", useLabel: "equip" },
@@ -541,6 +562,7 @@ const craftingRecipes = [
   { id: "cloth", category: "materials", output: { key: "cloth", count: 1 }, cost: { cotton: 3 }, desc: "Weave cotton into crafting cloth." },
   { id: "petal_extract", category: "materials", output: { key: "petal_extract", count: 1 }, cost: { flower: 3 }, desc: "Press flowers into bright extract." },
   { id: "bandage", category: "utilities", output: { key: "bandage", count: 1 }, cost: { cloth: 1, petal_extract: 1 }, desc: "Restore 2 health when used." },
+  { id: "torch", category: "utilities", output: { key: "torch", equipment: true }, cost: { wood_block: 1, cloth: 1, petal_extract: 1 }, desc: "Equip in your offhand to light the nearby area." },
   { id: "wooden_sword", category: "weapons", output: { key: "sword", weapon: true }, cost: { wood_block: 2, stone_brick: 1 }, desc: "Reliable close-range weapon." },
   { id: "bow", category: "weapons", output: { key: "bow", weapon: true }, cost: { wood_block: 2, cloth: 1 }, desc: "Long-range arrows." },
   { id: "spear", category: "weapons", output: { key: "spear", weapon: true }, cost: { wood_block: 1, stone_brick: 2 }, desc: "Longer melee reach." },
@@ -569,6 +591,7 @@ equippedItems = sanitizeEquipment(equippedItems);
 const DEFAULT_QUICK_KEYS = ["stick", null, null, null, null, null, null, null, null];
 let inventoryLayout = sanitizeInventoryLayout(loadJson(INV_LAYOUT_KEY, []));
 let quickSlots = sanitizeQuickSlots(loadJson(QUICKBAR_KEY, DEFAULT_QUICK_KEYS));
+selectedSlot = resolveSavedSelectedSlot(loadJson(QUICKBAR_SELECTION_KEY, { selectedSlot: null }).selectedSlot);
 
 const palette = {
   grass: "#84ad72",
@@ -651,6 +674,19 @@ window.MOSSVALE_DEBUG = {
     ready: online.playerStateReady,
   }),
 };
+window.MOSSVALE_GAME_API = {
+  addItems: awardInventoryItems,
+  inventory: () => ({ ...inventory }),
+  setGatherHud: (status = null) => {
+    externalGatherHud = status
+      ? {
+          resourceKey: status.resourceKey || "wood",
+          name: status.name || "Gathering",
+          progress: Number(status.progress) || 0,
+        }
+      : null;
+  },
+};
 requestAnimationFrame(tick);
 
 window.addEventListener("resize", resize);
@@ -667,30 +703,32 @@ window.addEventListener("blur", () => {
   stopHeldRightMove();
 });
 
-canvas.addEventListener("pointerdown", onPointerDown);
-canvas.addEventListener("pointermove", onPointerMove);
-canvas.addEventListener("pointerup", onPointerUp);
-canvas.addEventListener("pointercancel", onPointerUp);
-canvas.addEventListener("mousedown", onMouseDown);
-canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+if (has2dCanvas) {
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
+  canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerUp);
+  canvas.addEventListener("mousedown", onMouseDown);
+  canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+}
 
-ui.homeBtn.addEventListener("click", () => {
+ui.homeBtn?.addEventListener("click", () => {
   playSfx("ui");
   followSelf = true;
   selected = { kind: "player", id: player.id };
 });
 
-ui.plantBtn.addEventListener("click", () => plantTree());
-ui.buildBtn.addEventListener("click", () => setBuildMode(!buildMode));
-ui.craftBtn.addEventListener("click", () => setCraftOpen(!craftOpen));
-ui.waveBtn.addEventListener("click", () => {
+ui.plantBtn?.addEventListener("click", () => plantTree());
+ui.buildBtn?.addEventListener("click", () => setBuildMode(!buildMode));
+ui.craftBtn?.addEventListener("click", () => setCraftOpen(!craftOpen));
+ui.waveBtn?.addEventListener("click", () => {
   playSfx("wave");
   waveUntil = now + 1900;
   addFloat(player.x, player.y - 35, "hello");
   announce("wave", { x: player.x, y: player.y, name: player.name });
 });
 
-ui.pauseBtn.addEventListener("click", () => {
+ui.pauseBtn?.addEventListener("click", () => {
   playSfx("ui");
   paused = !paused;
   ui.pauseBtn.textContent = paused ? "▶" : "Ⅱ";
@@ -1007,7 +1045,7 @@ function setCraftOpen(open, options = {}) {
   craftOpen = open;
   ui.craftPanel.classList.toggle("is-open", craftOpen);
   ui.craftPanel.setAttribute("aria-hidden", String(!craftOpen));
-  ui.craftBtn.classList.toggle("is-active", craftOpen);
+  ui.craftBtn?.classList.toggle("is-active", craftOpen);
   if (craftOpen) {
     setBuildMode(false);
     setInventoryOpen(false, { silent: true });
@@ -1039,7 +1077,7 @@ function craftRecipe(index, quantity = 1) {
     saveOwnedWeapons();
     moveInventoryItem(recipe.output.key, firstOpenInventorySlot());
     assignFirstEmptyQuickSlot(recipe.output.key);
-  } else if (recipe.output.armor) {
+  } else if (recipe.output.armor || recipe.output.equipment) {
     inventory[recipe.output.key] = 1;
     equipItem(recipe.output.key, { silent: true });
   } else {
@@ -1072,7 +1110,7 @@ function craftStatus(recipe, quantity = 1) {
   if (recipe.output.weapon && isWeaponOwned(recipe.output.key)) {
     return { canCraft: false, label: "owned", reason: `${item.name} is already in your bag.` };
   }
-  if (recipe.output.armor && isArmorOwned(recipe.output.key)) {
+  if ((recipe.output.armor || recipe.output.equipment) && isArmorOwned(recipe.output.key)) {
     return { canCraft: false, label: "owned", reason: `${item.name} is already in your bag.` };
   }
   const missing = missingItems(recipe.cost, quantity);
@@ -1113,11 +1151,11 @@ function spendItems(cost, quantity = 1) {
 }
 
 function isSingleCraftRecipe(recipe) {
-  return Boolean(recipe.output.weapon || recipe.output.armor);
+  return Boolean(recipe.output.weapon || recipe.output.armor || recipe.output.equipment);
 }
 
 function recipeOutputCount(recipe, quantity = 1) {
-  return recipe.output.weapon || recipe.output.armor ? 1 : (recipe.output.count || 1) * quantity;
+  return recipe.output.weapon || recipe.output.armor || recipe.output.equipment ? 1 : (recipe.output.count || 1) * quantity;
 }
 
 function maxCraftQuantity(recipe) {
@@ -1155,7 +1193,7 @@ function setBuildMode(open) {
   if (buildMode) setCraftOpen(false, { silent: true });
   ui.buildPanel.classList.toggle("is-open", buildMode);
   ui.buildPanel.setAttribute("aria-hidden", String(!buildMode));
-  ui.buildBtn.classList.toggle("is-active", buildMode);
+  ui.buildBtn?.classList.toggle("is-active", buildMode);
   buildPreview = null;
   if (buildMode) {
     player.attackTargetId = null;
@@ -1248,9 +1286,13 @@ function refreshInventoryPanel() {
 function selectSlot(index) {
   playSfx("ui", 0.58);
   selectedSlot = clamp(index, 0, QUICK_SLOT_COUNT - 1);
+  saveQuickSlots();
   const item = currentQuickItem();
   if (item?.kind === "weapon") {
     equippedItems.weapon = item.key;
+    saveEquipment();
+  } else if (!item) {
+    equippedItems.weapon = null;
     saveEquipment();
   }
   renderQuickbar();
@@ -1259,7 +1301,7 @@ function selectSlot(index) {
   refreshInventoryPanel();
   const weapon = currentWeapon();
   if (!item) {
-    ui.actionLine.textContent = `Quick slot ${selectedSlot + 1} is empty. Drag an inventory item here.`;
+    ui.actionLine.textContent = `Quick slot ${selectedSlot + 1} is empty. Weapon unequipped.`;
   } else if (item.kind === "weapon") {
     ui.actionLine.textContent = `${weapon.name} ${itemLevelText(weapon)} equipped. Q/W/E/R abilities ready.`;
   } else {
@@ -1269,6 +1311,19 @@ function selectSlot(index) {
 
 function currentQuickItem() {
   return itemForKey(quickSlots[selectedSlot]);
+}
+
+function resolveSavedSelectedSlot(savedSlot) {
+  const slot = Number.isFinite(Number(savedSlot))
+    ? clamp(Math.floor(Number(savedSlot)), 0, QUICK_SLOT_COUNT - 1)
+    : null;
+  if (slot != null && itemForKey(quickSlots[slot])) return slot;
+
+  const weaponSlot = quickSlots.findIndex(
+    (key) => key === equippedItems.weapon && itemForKey(key)?.kind === "weapon",
+  );
+  if (weaponSlot >= 0) return weaponSlot;
+  return slot ?? 0;
 }
 
 function currentWeapon() {
@@ -1307,7 +1362,14 @@ function itemForKey(key, options = {}) {
   }
   const def = itemDefs.find((item) => item.key === key);
   if (!def || (!options.includeLocked && (inventory[def.key] || 0) <= 0)) return null;
-  const kind = def.type === "Consumable" ? "consumable" : def.type === "Armor" ? "armor" : "resource";
+  const kind =
+    def.type === "Consumable"
+      ? "consumable"
+      : def.type === "Armor"
+        ? "armor"
+        : def.type === "Utility"
+          ? "utility"
+          : "resource";
   return { ...def, kind, count: inventory[def.key] || 0 };
 }
 
@@ -1319,19 +1381,19 @@ function ownedInventoryKeys() {
 }
 
 function equippedInventoryKeys() {
-  return [currentWeapon().key, ...Object.values(equippedItems)].filter(Boolean);
+  return Object.values(equippedItems).filter(Boolean);
 }
 
 function sanitizeEquipment(source = {}) {
-  const next = { head: null, weapon: null, body: null, offhand: null, feet: null, charm: null };
+  const next = { head: null, weapon: null, body: null, offhand: null, charm: null, legs: null, charm2: null, feet: null };
   for (const slotId of Object.keys(next)) {
     const key = typeof source?.[slotId] === "string" ? source[slotId] : null;
     if (slotId === "weapon") {
       next.weapon = key && isWeaponOwned(key) ? key : null;
       continue;
     }
-    const armor = itemDefs.find((item) => item.key === key && item.type === "Armor" && item.slot === slotId);
-    next[slotId] = armor && (inventory[armor.key] || 0) > 0 ? armor.key : null;
+    const item = itemForKey(key);
+    next[slotId] = item && canEquipItemInSlot(item, slotId) ? item.key : null;
   }
   return next;
 }
@@ -1406,6 +1468,7 @@ function saveInventoryLayout() {
 
 function saveQuickSlots() {
   saveJson(QUICKBAR_KEY, quickSlots);
+  saveJson(QUICKBAR_SELECTION_KEY, { selectedSlot });
 }
 
 function saveEquipment() {
@@ -1431,24 +1494,23 @@ function itemIconMarkup(item, extraClass = "") {
 }
 
 function renderEquipmentSlots() {
-  const weapon = currentWeapon();
   const slotViews = [
     { id: "head", label: "head", area: "head", item: itemForKey(equippedItems.head) },
-    { id: "weapon", label: "weapon", area: "weapon", item: weapon },
+    { id: "weapon", label: "weapon", area: "weapon", item: itemForKey(equippedItems.weapon) },
     { id: "body", label: "body", area: "body", item: itemForKey(equippedItems.body) },
     { id: "offhand", label: "offhand", area: "offhand", item: itemForKey(equippedItems.offhand) },
-    { id: "feet", label: "feet", area: "feet", item: itemForKey(equippedItems.feet) },
     { id: "charm", label: "charm", area: "charm", item: itemForKey(equippedItems.charm) },
+    { id: "legs", label: "leggings", area: "legs", item: itemForKey(equippedItems.legs) },
+    { id: "charm2", label: "charm", area: "charm2", item: itemForKey(equippedItems.charm2) },
+    { id: "feet", label: "feet", area: "feet", item: itemForKey(equippedItems.feet) },
   ];
 
   ui.equipmentSlots.innerHTML = slotViews
     .map((slot) => {
       if (slot.item) {
         return `<button class="equipment-slot is-filled equipment-${slot.area}" type="button" data-equip-slot="${slot.id}" data-item="${slot.item.key}" title="${slot.item.name}, ${itemLevelText(slot.item)}" aria-label="${slot.item.name}, ${itemLevelText(slot.item)}">
-          <span class="equipment-label">${slot.label}</span>
           <span class="item-level-badge">${itemLevelShort(slot.item)}</span>
           ${itemIconMarkup(slot.item, "equipment-weapon-icon")}
-          <strong>${slot.item.name}</strong>
         </button>`;
       }
       return `<div class="equipment-slot is-empty equipment-${slot.area}" data-equip-slot="${slot.id}" title="Empty ${slot.label} slot" aria-label="Empty ${slot.label} slot">
@@ -1555,7 +1617,7 @@ function onEquipmentDrop(event) {
   if (!slot || !item || !canEquipItemInSlot(item, slot.dataset.equipSlot)) return;
   event.preventDefault();
   clearEquipmentDropTarget();
-  equipItem(payload.key);
+  equipItem(payload.key, { slotId: slot.dataset.equipSlot });
 }
 
 function onQuickbarDrop(event) {
@@ -1623,23 +1685,38 @@ function equipmentSlotForItem(item) {
   return item?.slot || null;
 }
 
+function compatibleEquipmentSlots(item) {
+  const slotId = equipmentSlotForItem(item);
+  if (slotId === "charm") return ["charm", "charm2"];
+  return slotId ? [slotId] : [];
+}
+
 function isEquippableItem(item) {
   return Boolean(equipmentSlotForItem(item));
 }
 
 function canEquipItemInSlot(item, slotId) {
-  return Boolean(slotId && equipmentSlotForItem(item) === slotId);
+  return Boolean(slotId && compatibleEquipmentSlots(item).includes(slotId));
+}
+
+function targetEquipmentSlotForItem(item, preferredSlotId = null) {
+  const slots = compatibleEquipmentSlots(item);
+  if (preferredSlotId && slots.includes(preferredSlotId)) return preferredSlotId;
+  return slots.find((slotId) => !equippedItems?.[slotId]) || slots[0] || null;
+}
+
+function equippedSlotForItem(item) {
+  return compatibleEquipmentSlots(item).find((slotId) => equippedItems?.[slotId] === item?.key) || null;
 }
 
 function isEquippedItem(item) {
   if (!item) return false;
-  if (item.kind === "weapon") return currentWeapon().key === item.key;
-  return equippedItems[equipmentSlotForItem(item)] === item.key;
+  return Boolean(equippedSlotForItem(item));
 }
 
 function equipItem(key, options = {}) {
   const item = itemForKey(key);
-  const slotId = equipmentSlotForItem(item);
+  const slotId = targetEquipmentSlotForItem(item, options.slotId);
   if (!item || !slotId) {
     playSfx("error");
     return false;
@@ -1652,6 +1729,7 @@ function equipItem(key, options = {}) {
     const existingIndex = quickSlots.indexOf(item.key);
     if (existingIndex >= 0) {
       selectedSlot = existingIndex;
+      saveQuickSlots();
     }
   }
 
@@ -1663,6 +1741,27 @@ function equipItem(key, options = {}) {
   renderInventoryPanel();
   updateHud();
   if (!options.silent) ui.actionLine.textContent = `${item.name} equipped. Health ${player.hp}/${player.maxHp}.`;
+  return true;
+}
+
+function unequipItem(key) {
+  const item = itemForKey(key);
+  const slotId = equippedSlotForItem(item);
+  if (!item || !slotId || equippedItems[slotId] !== item.key) {
+    playSfx("error");
+    return false;
+  }
+
+  equippedItems[slotId] = null;
+  saveEquipment();
+  syncPlayerStats();
+  playSfx("ui", 0.68);
+  hideItemPopover();
+  renderQuickbar();
+  renderAbilityBar();
+  renderInventoryPanel();
+  updateHud();
+  ui.actionLine.textContent = `${item.name} unequipped. Health ${player.hp}/${player.maxHp}.`;
   return true;
 }
 
@@ -1686,9 +1785,9 @@ function showItemPopover(item) {
   const equipped = isEquippedItem(item);
   ui.itemPopoverAction.hidden = item.kind !== "consumable" && !isEquippable;
   ui.itemPopoverAction.dataset.item = item.key;
-  ui.itemPopoverAction.dataset.action = isEquippable ? "equip" : "use";
-  ui.itemPopoverAction.disabled = equipped;
-  ui.itemPopoverAction.textContent = isEquippable ? (equipped ? "equipped" : "equip") : item.useLabel || "use";
+  ui.itemPopoverAction.dataset.action = isEquippable ? (equipped ? "unequip" : "equip") : "use";
+  ui.itemPopoverAction.disabled = false;
+  ui.itemPopoverAction.textContent = isEquippable ? (equipped ? "unequip" : "equip") : item.useLabel || "use";
   ui.itemPopover.classList.add("is-open");
   ui.itemPopover.setAttribute("aria-hidden", "false");
 }
@@ -1707,6 +1806,10 @@ function usePopoverItem() {
   if (!key) return;
   if (ui.itemPopoverAction.dataset.action === "equip") {
     equipItem(key);
+    return;
+  }
+  if (ui.itemPopoverAction.dataset.action === "unequip") {
+    unequipItem(key);
     return;
   }
   useInventoryItem(key);
@@ -2874,7 +2977,7 @@ function playerLootItems() {
 function clearPlayerLootedItems() {
   for (const key of Object.keys(inventory)) inventory[key] = 0;
   ownedWeapons = sanitizeOwnedWeapons({ stick: true });
-  equippedItems = { head: null, weapon: "stick", body: null, offhand: null, feet: null, charm: null };
+  equippedItems = { head: null, weapon: "stick", body: null, offhand: null, charm: null, legs: null, charm2: null, feet: null };
   inventoryLayout = sanitizeInventoryLayout([]);
   quickSlots = sanitizeQuickSlots(["stick"]);
   selectedSlot = 0;
@@ -2919,6 +3022,33 @@ function collectLoot(loot) {
   scheduleRemoteWorldSave();
 }
 
+function awardInventoryItems(items = emptyInventory(), options = {}) {
+  const normalized = normalizeInventory(items);
+  if (inventoryTotal(normalized) <= 0) return { ...inventory };
+
+  for (const [key, count] of Object.entries(normalized)) {
+    if (count <= 0) continue;
+    inventory[key] = (inventory[key] || 0) + count;
+  }
+
+  saveJson(INV_KEY, inventory);
+  refreshInventoryPanel();
+  if (craftOpen) renderCraftPanel();
+  showPickupToast(normalized);
+
+  if (options.sound !== false) {
+    playSfx(options.sound || "complete", options.intensity ?? 0.86);
+  }
+
+  if (options.message) {
+    ui.actionLine.textContent = options.message;
+  } else {
+    ui.actionLine.textContent = `Gathered ${inventorySummary(normalized)}.`;
+  }
+
+  return { ...inventory };
+}
+
 function isWeaponKey(key) {
   return weapons.some((weapon) => weapon.id === key);
 }
@@ -2946,6 +3076,7 @@ function isBotDefeated(bot) {
 }
 
 function draw() {
+  if (!ctx) return;
   ctx.clearRect(0, 0, width, height);
   ctx.save();
   ctx.translate(width / 2, height / 2);
@@ -4220,6 +4351,15 @@ function applyAvatarStyle(element, actor) {
 function updateGatherHud() {
   const action = player.action;
   const res = action ? resources.find((item) => item.id === action.resourceId) : null;
+  if (!action && externalGatherHud) {
+    ui.gatherHud.hidden = false;
+    ui.gatherHud.setAttribute("aria-hidden", "false");
+    ui.gatherIcon.className = `item-icon ${externalGatherHud.resourceKey}`;
+    ui.gatherName.textContent = externalGatherHud.name;
+    ui.gatherProgress.style.width = `${Math.round(clamp(externalGatherHud.progress, 0, 1) * 100)}%`;
+    return;
+  }
+
   if (!action || !res || isDepleted(res)) {
     ui.gatherHud.hidden = true;
     ui.gatherHud.setAttribute("aria-hidden", "true");
@@ -4904,13 +5044,19 @@ function sendOnlineMessage(message) {
 }
 
 function hideLoadingScreen() {
+  if (document.body.classList.contains("renderer-3d-preview")) {
+    ui.loadingScreen?.classList.add("is-data-ready");
+    if (ui.loadingDetail) ui.loadingDetail.textContent = "Growing the grove...";
+    window.dispatchEvent(new CustomEvent("mossvale:world-data-ready"));
+    return;
+  }
   ui.loadingScreen?.classList.add("is-hidden");
 }
 
 function showLoadingError(detail) {
   if (!ui.loadingScreen) return;
   ui.loadingScreen.classList.add("is-error");
-  ui.loadingScreen.classList.remove("is-hidden");
+  ui.loadingScreen.classList.remove("is-hidden", "is-data-ready");
   if (ui.loadingTitle) ui.loadingTitle.textContent = "Could not load grove";
   if (ui.loadingDetail) ui.loadingDetail.textContent = detail;
 }
@@ -5079,7 +5225,7 @@ async function connectOnlineWorld() {
   online.worldId = config.worldId || "main";
 
   try {
-    const { createClient } = await import(SUPABASE_IMPORT_URL);
+    const { createClient } = await import(/* @vite-ignore */ SUPABASE_IMPORT_URL);
     online.client = createClient(config.url, config.publishableKey, {
       auth: {
         autoRefreshToken: false,
@@ -5667,6 +5813,7 @@ function resize() {
   width = window.innerWidth;
   height = window.innerHeight;
   camera.zoom = targetCameraZoom();
+  if (!has2dCanvas) return;
   canvas.width = Math.floor(width * dpr);
   canvas.height = Math.floor(height * dpr);
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

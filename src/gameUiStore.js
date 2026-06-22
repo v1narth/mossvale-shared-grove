@@ -6,12 +6,14 @@ import {
   baseItemForKey,
   buildPieces,
   canEquipItemInSlot,
+  compatibleEquipmentSlots,
   countLabel,
   defaultOwnedWeapons,
   emptyEquipment,
   emptyInventory,
   equipmentSlotForItem,
   inventorySummary,
+  itemDefs,
   itemLevelText,
   normalizeInventory,
   weaponDefs,
@@ -27,6 +29,7 @@ import {
 } from './cloudPersistence.js';
 
 const DEFAULT_QUICK_KEYS = ['stick', null, null, null, null, null, null, null, null];
+const GRANT_TEST_GEAR = true;
 const LOCAL_WORLD_SYNC_GRACE_MS = 15000;
 const LOADING_STEPS = [
   { id: 'world', label: 'World', detail: 'Sync shared grove state.' },
@@ -222,6 +225,44 @@ function sanitizeOwnedWeapons(source) {
   return next;
 }
 
+function allOwnedWeapons() {
+  return Object.fromEntries(weaponDefs.map((weapon) => [weapon.id, true]));
+}
+
+function testGearInventory(source = emptyInventory()) {
+  const inventory = normalizeInventory(source);
+  for (const item of itemDefs) {
+    if (item.type === 'Armor') inventory[item.key] = Math.max(1, inventory[item.key] || 0);
+  }
+  return inventory;
+}
+
+function applyTestGear(state) {
+  if (!GRANT_TEST_GEAR) return state;
+  const quickSlots = [
+    ...weaponDefs.map((weapon) => weapon.id),
+    ...Array.from({ length: QUICK_SLOT_COUNT }, () => null),
+  ].slice(0, QUICK_SLOT_COUNT);
+  const equipment = {
+    ...state.equipment,
+    weapon: state.equipment?.weapon || weaponDefs[0]?.id || 'stick',
+  };
+  for (const item of itemDefs) {
+    if (item.type === 'Armor' && item.slot && !equipment[item.slot]) {
+      equipment[item.slot] = item.key;
+    }
+  }
+  return {
+    ...state,
+    health: { ...state.health, current: 999 },
+    inventory: testGearInventory(state.inventory),
+    ownedWeapons: allOwnedWeapons(),
+    equipment,
+    quickSlots,
+    actionLine: state.actionLine || 'All weapons and armor unlocked for testing.',
+  };
+}
+
 function isWeaponOwned(id, ownedWeapons) {
   return Boolean(ownedWeapons?.[id] || weaponDefs.find((weapon) => weapon.id === id)?.starter);
 }
@@ -255,6 +296,12 @@ function sanitizeEquipment(source = {}, state) {
     next[slotId] = item && canEquipItemInSlot(item, slotId) ? item.key : null;
   }
   return next;
+}
+
+function targetEquipmentSlotForItem(item, state, preferredSlotId = null) {
+  const slots = compatibleEquipmentSlots(item);
+  if (preferredSlotId && slots.includes(preferredSlotId)) return preferredSlotId;
+  return slots.find((slotId) => !state.equipment?.[slotId]) || slots[0] || null;
 }
 
 function sanitizeInventoryLayout(layout, state) {
@@ -419,7 +466,7 @@ function craftStatus(recipe, state, quantity = 1) {
 
 let nextToastId = 1;
 
-const initialState = normalizeState({
+const initialState = normalizeState(applyTestGear({
   playerName: loadPlayerName(),
   health: { current: 5, max: 5 },
   energy: { current: 24, max: 24 },
@@ -450,7 +497,7 @@ const initialState = normalizeState({
   loadingHidden: false,
   loadingDetail: 'Preparing Mossvale...',
   loadingSteps: initialLoadingSteps(),
-});
+}));
 
 export const gameUiStore = createStore((set, get) => ({
   ...initialState,
@@ -565,7 +612,7 @@ export const gameUiStore = createStore((set, get) => ({
     }
 
     const quickSlotSave = parseQuickSlotSave(cloudState.quick_slots);
-    const next = normalizeState({
+    const next = normalizeState(applyTestGear({
       ...current,
       inventory: normalizeInventory(cloudState.inventory || current.inventory),
       ownedWeapons: sanitizeOwnedWeapons(cloudState.owned_weapons),
@@ -575,7 +622,7 @@ export const gameUiStore = createStore((set, get) => ({
         : current.inventoryLayout,
       quickSlots: quickSlotSave.slots,
       selectedSlot: quickSlotSave.selectedSlot ?? current.selectedSlot,
-    }, {
+    }), {
       resolveSelectedSlot: true,
       preferSavedSlot: quickSlotSave.selectedSlot != null,
     });
@@ -774,10 +821,10 @@ export const gameUiStore = createStore((set, get) => ({
     return true;
   },
 
-  equipItem: (key) => {
+  equipItem: (key, preferredSlotId = null) => {
     const state = get();
     const item = itemForState(key, state);
-    const slotId = equipmentSlotForItem(item);
+    const slotId = targetEquipmentSlotForItem(item, state, preferredSlotId);
     if (!item || !slotId) {
       playSfx('error');
       return false;
@@ -858,7 +905,7 @@ export const gameUiStore = createStore((set, get) => ({
     } else {
       inventory[recipe.output.key] = (inventory[recipe.output.key] || 0) + (recipe.output.count || 1) * craftQuantity;
       if (recipe.output.armor || recipe.output.equipment) {
-        const slotId = baseItemForKey(recipe.output.key)?.slot;
+        const slotId = targetEquipmentSlotForItem(baseItemForKey(recipe.output.key), { ...state, equipment });
         if (slotId) equipment[slotId] = recipe.output.key;
       }
     }

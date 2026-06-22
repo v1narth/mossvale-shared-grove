@@ -3,7 +3,7 @@ export const PLAYER_NAME_STORAGE_KEY = 'mossvale_player_name';
 export const RESOURCE_KEYS = ['wood', 'stone', 'flower', 'cotton'];
 export const BAG_SLOT_COUNT = 30;
 export const QUICK_SLOT_COUNT = 9;
-export const EQUIPMENT_SLOTS = ['head', 'weapon', 'body', 'offhand', 'feet', 'charm'];
+export const EQUIPMENT_SLOTS = ['head', 'weapon', 'body', 'offhand', 'charm', 'legs', 'charm2', 'feet'];
 
 const PUBLIC_ASSET_BASE = `${import.meta.env.BASE_URL || '/'}assets/`;
 const INVENTORY_ICON_BASE = `${PUBLIC_ASSET_BASE}inventory`;
@@ -54,13 +54,13 @@ export function resourceTierImage(resourceKey, tier = 1) {
 export const weaponDefs = [
   { id: 'stick', name: 'Walking Stick', icon: 'K', image: inventoryImage('stick'), level: 1, range: 36, cooldown: 0.66, damage: 1, speed: 0, color: '#d7a45c', type: 'Weapon', weaponType: 'melee', starter: true, desc: 'A starter branch. Good enough for light defense while you gather crafting parts.' },
   { id: 'sword', name: 'Knight Sword', icon: 'S', image: inventoryImage('sword'), level: 1, range: 48, cooldown: 0.48, damage: 2, speed: 0, color: '#eef3df', type: 'Weapon', weaponType: 'melee', desc: 'A KayKit one-handed sword with a clean, reliable close-range swing.' },
-  { id: 'dagger', name: 'Rogue Dagger', icon: 'D', level: 1, range: 38, cooldown: 0.36, damage: 1, speed: 0, color: '#d9e0cf', type: 'Weapon', weaponType: 'melee', desc: 'A quick KayKit dagger for fast close-range cuts.' },
+  { id: 'dagger', name: 'Rogue Dagger', icon: 'D', image: inventoryImage('dagger'), level: 1, range: 38, cooldown: 0.36, damage: 1, speed: 0, color: '#d9e0cf', type: 'Weapon', weaponType: 'melee', desc: 'A quick KayKit dagger for fast close-range cuts.' },
   { id: 'bow', name: 'Ranger Bow', icon: 'B', image: inventoryImage('bow'), level: 2, range: 260, cooldown: 0.96, damage: 2, speed: 500, color: '#f0d27a', type: 'Weapon', weaponType: 'arrow', desc: 'A KayKit bow with a visible string and long-range arrows.' },
-  { id: 'crossbow', name: 'Rogue Crossbow', icon: 'C', level: 3, range: 285, cooldown: 1.05, damage: 3, speed: 620, color: '#d6ccb8', type: 'Weapon', weaponType: 'arrow', desc: 'A sturdy KayKit crossbow for slower, heavier ranged shots.' },
-  { id: 'wand', name: 'Mage Wand', icon: 'W', image: inventoryImage('wand'), level: 3, range: 235, cooldown: 1.08, damage: 2, speed: 390, color: '#cfb2ff', type: 'Weapon', weaponType: 'spark', desc: 'A KayKit wand for slow drifting sparks and careful aim.' },
-  { id: 'staff', name: 'Mage Staff', icon: 'F', level: 4, range: 275, cooldown: 1.18, damage: 3, speed: 430, color: '#b99cff', type: 'Weapon', weaponType: 'spark', desc: 'A full KayKit staff with heavier magical reach.' },
-  { id: 'battle_axe', name: 'Battle Axe', icon: 'A', level: 3, range: 54, cooldown: 0.78, damage: 3, speed: 0, color: '#d8b16b', type: 'Weapon', weaponType: 'melee', desc: 'A one-handed KayKit axe with weightier melee hits.' },
-  { id: 'great_axe', name: 'Great Axe', icon: 'G', level: 4, range: 62, cooldown: 1.08, damage: 4, speed: 0, color: '#e1bd78', type: 'Weapon', weaponType: 'melee', desc: 'A two-handed KayKit axe for slow, heavy close-range impact.' },
+  { id: 'crossbow', name: 'Rogue Crossbow', icon: 'C', image: inventoryImage('crossbow'), level: 3, range: 285, cooldown: 1.05, damage: 3, speed: 620, color: '#d6ccb8', type: 'Weapon', weaponType: 'arrow', desc: 'A sturdy KayKit crossbow for slower, heavier ranged shots.' },
+  { id: 'wand', name: 'Mage Wand', icon: 'W', image: inventoryImage('wand'), level: 3, range: 320, cooldown: 1.08, damage: 2, speed: 720, color: '#cfb2ff', type: 'Weapon', weaponType: 'spark', desc: 'A KayKit wand for quick firebolts and careful long-range aim.' },
+  { id: 'staff', name: 'Mage Staff', icon: 'F', image: inventoryImage('staff'), level: 4, range: 380, cooldown: 1.18, damage: 3, speed: 820, color: '#b99cff', type: 'Weapon', weaponType: 'spark', desc: 'A full KayKit staff with fast, heavy magical reach.' },
+  { id: 'battle_axe', name: 'Battle Axe', icon: 'A', image: inventoryImage('battle_axe'), level: 3, range: 54, cooldown: 0.78, damage: 3, speed: 0, color: '#d8b16b', type: 'Weapon', weaponType: 'melee', desc: 'A one-handed KayKit axe with weightier melee hits.' },
+  { id: 'great_axe', name: 'Great Axe', icon: 'G', image: inventoryImage('great_axe'), level: 4, range: 62, cooldown: 1.08, damage: 4, speed: 0, color: '#e1bd78', type: 'Weapon', weaponType: 'melee', desc: 'A two-handed KayKit axe for slow, heavy close-range impact.' },
 ];
 
 export const itemDefs = [
@@ -73,7 +73,7 @@ export const itemDefs = [
   { key: 'cloth', name: 'Cloth', singular: 'cloth', plural: 'cloth', image: resourceTierImage('cotton', 3), className: 'cloth', type: 'Material', level: 1, desc: 'Woven cotton cloth. Used for bandages, bowstrings, padding, and travel gear.' },
   { key: 'petal_extract', name: 'Petal Extract', singular: 'petal extract', plural: 'petal extract', image: resourceTierImage('flower', 3), className: 'petal-extract', type: 'Material', level: 2, desc: 'Pressed glowflower essence. Used for utility craft, charms, and energy weapons.' },
   { key: 'bandage', name: 'Bandage', singular: 'bandage', plural: 'bandages', image: inventoryImage('bandage'), className: 'bandage', type: 'Consumable', displayType: 'Consumable', level: 1, desc: 'A clean cotton wrap with petals tucked in. Use it to restore 2 health.', useLabel: 'use bandage' },
-  { key: 'torch', name: 'Torch', singular: 'torch', plural: 'torches', className: 'torch', type: 'Utility', displayType: 'Utility', level: 1, slot: 'offhand', desc: 'A pitch-wrapped branch that throws warm light around you. Equip it in your offhand to brighten the nearby grove.', useLabel: 'equip' },
+  { key: 'torch', name: 'Torch', singular: 'torch', plural: 'torches', image: inventoryImage('torch'), className: 'torch', type: 'Utility', displayType: 'Utility', level: 1, slot: 'offhand', desc: 'A pitch-wrapped branch that throws warm light around you. Equip it in your offhand to brighten the nearby grove.', useLabel: 'equip' },
   { key: 'cloth_cap', name: 'Cloth Cap', singular: 'cloth cap', plural: 'cloth caps', image: inventoryImage('cloth_cap'), className: 'armor-head', type: 'Armor', displayType: 'Armor', level: 1, slot: 'head', hpBonus: 1, desc: 'A soft cap that keeps your head out of trouble. Equip for +1 max health.', useLabel: 'equip' },
   { key: 'padded_vest', name: 'Padded Vest', singular: 'padded vest', plural: 'padded vests', image: inventoryImage('padded_vest'), className: 'armor-body', type: 'Armor', displayType: 'Armor', level: 2, slot: 'body', hpBonus: 2, desc: 'Layered cloth padding over a small wood frame. Equip for +2 max health.', useLabel: 'equip' },
   { key: 'wooden_shield', name: 'Wooden Shield', singular: 'wooden shield', plural: 'wooden shields', image: inventoryImage('wooden_shield'), className: 'armor-offhand', type: 'Armor', displayType: 'Armor', level: 2, slot: 'offhand', hpBonus: 1, desc: 'A blocky offhand guard made from refined wood. Equip for +1 max health.', useLabel: 'equip' },
@@ -289,6 +289,12 @@ export function equipmentSlotForItem(item) {
   return item?.slot || null;
 }
 
+export function compatibleEquipmentSlots(item) {
+  const slotId = equipmentSlotForItem(item);
+  if (slotId === 'charm') return ['charm', 'charm2'];
+  return slotId ? [slotId] : [];
+}
+
 export function canEquipItemInSlot(item, slotId) {
-  return Boolean(slotId && equipmentSlotForItem(item) === slotId);
+  return Boolean(slotId && compatibleEquipmentSlots(item).includes(slotId));
 }

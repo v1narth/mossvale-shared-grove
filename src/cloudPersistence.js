@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { EQUIPMENT_SLOTS } from './gameUiData.js';
 
 const PLAYER_ID_STORAGE_KEY = 'mossvale_player_id';
 const PLAYER_POSITION_STORAGE_PREFIX = 'mossvale_player_position';
@@ -6,8 +7,6 @@ const PLAYER_TABLE = 'mossvale_players';
 const PLAYER_STATE_TABLE = 'mossvale_player_states';
 const WORLD_TABLE = 'mossvale_worlds';
 const ACTIVE_PLAYER_MS = 45000;
-const EQUIPMENT_SLOTS = ['head', 'weapon', 'body', 'offhand', 'feet', 'charm'];
-
 let warnedMissingConfig = false;
 let saveTimer = null;
 let pendingState = null;

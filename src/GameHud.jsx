@@ -6,6 +6,7 @@ import {
   abilitySets,
   buildPieces,
   canEquipItemInSlot,
+  compatibleEquipmentSlots,
   craftCategories,
   craftingRecipes,
   equipmentSlotForItem,
@@ -67,37 +68,48 @@ function clearDragPayload() {
   gameUiStore.getState().setDragPayload(null);
 }
 
+function itemSlotVisual(item) {
+  const slotSpecialty =
+    item?.kind === 'weapon'
+      ? item.weaponType === 'arrow'
+        ? 'ranged'
+        : item.weaponType === 'spark'
+          ? 'magic'
+          : 'melee'
+      : item?.kind || 'empty';
+  const slotLevel = item ? Math.max(1, Math.min(4, Math.floor(item.level || 1))) : 0;
+  return {
+    className: `inventory-slot-${slotSpecialty} inventory-slot-level-${slotLevel}`,
+    style: item ? { '--slot-accent': item.color || '#d7a45c' } : undefined,
+  };
+}
+
+function moveDroppedPayloadToInventory(payload, index) {
+  if (!payload?.key) return false;
+  const store = gameUiStore.getState();
+  if (payload.source === 'equipment') {
+    if (!payload.slotId || !store.unequipItem(payload.slotId)) return false;
+  }
+  return gameUiStore.getState().moveInventoryItem(payload.key, index);
+}
+
 function PlayerCard() {
   const playerName = useGameUiStore((state) => state.playerName);
   const health = useGameUiStore((state) => state.health);
   const energy = useGameUiStore((state) => state.energy);
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(playerName);
 
   return (
-    <>
-      <div className="player-card">
+    <div className="player-card">
+      <div className="player-identity">
         <div id="playerAvatar" className="traveler-avatar" aria-hidden="true">
-          <span className="avatar-body" />
-          <span className="avatar-head" />
-          <span className="avatar-hair" />
+          <img src="/assets/ui/player-avatar.png" alt="" draggable="false" />
         </div>
-        <div className="player-status">
-          <div className="tiny-row">
-            <span id="playerName">{playerName}</span>
-            <button
-              id="renameBtn"
-              title="Rename character"
-              aria-label="Rename character"
-              onClick={() => {
-                playSfx('ui', 0.55);
-                setDraft(playerName);
-                setRenaming(true);
-              }}
-            >
-              rename
-            </button>
-          </div>
+        <span id="playerName" className="player-nameplate">
+          {playerName}
+        </span>
+      </div>
+      <div className="player-status">
+        <div className="status-frame">
           <div className="status-row health-row" aria-label="Health">
             <span>HP</span>
             <div className="health-shell">
@@ -118,32 +130,7 @@ function PlayerCard() {
           </div>
         </div>
       </div>
-
-      <div className={`name-modal ${renaming ? 'is-open' : ''}`} id="nameModal" aria-hidden={!renaming}>
-        <form
-          id="nameForm"
-          className="name-card"
-          onSubmit={(event) => {
-            event.preventDefault();
-            gameUiStore.getState().setPlayerName(draft);
-            playSfx('complete', 0.72);
-            setRenaming(false);
-          }}
-        >
-          <label htmlFor="nameInput">Traveler name</label>
-          <div className="name-row">
-            <input
-              id="nameInput"
-              maxLength={16}
-              autoComplete="off"
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-            />
-            <button type="submit">join</button>
-          </div>
-        </form>
-      </div>
-    </>
+    </div>
   );
 }
 
@@ -201,15 +188,19 @@ function Quickbar() {
     <div className="quickbar" id="quickbar" aria-label="Quick bar">
       {slots.map((key, index) => {
         const item = state.itemForKey(key);
+        const slotVisual = itemSlotVisual(item);
         return (
           <button
             type="button"
-            className={`quick-slot ${index === state.selectedSlot ? 'is-active' : ''} ${item ? '' : 'is-empty'} ${
+            className={`quick-slot ${slotVisual.className} ${
+              index === state.selectedSlot ? 'is-active' : ''
+            } ${item ? '' : 'is-empty'} ${
               state.dragPayload?.source === 'quickbar' && state.dragPayload?.index === index ? 'is-dragging' : ''
             }`}
             data-slot={index}
             draggable={Boolean(item)}
             key={`${key || 'empty'}-${index}`}
+            style={slotVisual.style}
             onClick={() => gameUiStore.getState().selectQuickSlot(index)}
             onDragStart={(event) => {
               if (!item) return;
@@ -227,7 +218,7 @@ function Quickbar() {
               event.preventDefault();
               gameUiStore.getState().assignQuickSlot(payload.key, index, payload.source === 'quickbar' ? payload.index : null);
             }}
-            title={item ? `${index + 1}: ${item.name} (${itemLevelText(item)})` : `${index + 1}: Empty quick slot`}
+            title={item ? undefined : `${index + 1}: Empty quick slot`}
             aria-label={item ? `Select ${item.name}, ${itemLevelText(item)}` : `Empty quick slot ${index + 1}`}
           >
             <span className="slot-key">{index + 1}</span>
@@ -235,7 +226,13 @@ function Quickbar() {
               <>
                 <span className="slot-level">{itemLevelShort(item)}</span>
                 <ItemIcon itemKey={item.key} className="slot-icon" />
-                <span className="slot-name">{item.name}</span>
+                <span className="quick-slot-tooltip" role="tooltip">
+                  <strong>{item.name}</strong>
+                  <span>
+                    {item.displayType || item.type || 'Item'} - {itemLevelText(item)}
+                  </span>
+                  {item.desc ? <small>{item.desc}</small> : null}
+                </span>
               </>
             ) : (
               <span className="slot-empty">+</span>
@@ -294,17 +291,21 @@ function InventoryPanel() {
   const state = useGameUiStore();
   const slots = state.inventoryLayout;
   const selected = state.itemForKey(state.selectedItemKey);
-  const selectedEquipmentSlot = selected ? equipmentSlotForItem(selected) : null;
-  const selectedIsEquipped = Boolean(
-    selectedEquipmentSlot && state.equipment[selectedEquipmentSlot] === selected?.key,
-  );
+  const selectedEquipmentSlots = selected ? compatibleEquipmentSlots(selected) : [];
+  const selectedEquippedSlot =
+    selectedEquipmentSlots.find((slotId) => state.equipment[slotId] === selected?.key) || null;
+  const selectedEquipmentSlot =
+    selectedEquippedSlot || selectedEquipmentSlots.find((slotId) => !state.equipment[slotId]) || selectedEquipmentSlots[0] || null;
+  const selectedIsEquipped = Boolean(selectedEquippedSlot);
   const equipmentSlots = [
     { id: 'head', label: 'head', area: 'head' },
     { id: 'weapon', label: 'weapon', area: 'weapon' },
     { id: 'body', label: 'body', area: 'body' },
     { id: 'offhand', label: 'offhand', area: 'offhand' },
-    { id: 'feet', label: 'feet', area: 'feet' },
     { id: 'charm', label: 'charm', area: 'charm' },
+    { id: 'legs', label: 'leggings', area: 'legs' },
+    { id: 'charm2', label: 'charm', area: 'charm2' },
+    { id: 'feet', label: 'feet', area: 'feet' },
   ];
   const used = slots.filter(Boolean).length;
 
@@ -330,6 +331,7 @@ function InventoryPanel() {
             const item = state.itemForKey(state.equipment[slot.id]);
             const draggedItem = state.itemForKey(state.dragPayload?.key);
             const canDrop = draggedItem ? canEquipItemInSlot(draggedItem, slot.id) : false;
+            const slotVisual = itemSlotVisual(item);
             const commonProps = {
               'data-equip-slot': slot.id,
               onDragOver: (event) => {
@@ -344,25 +346,35 @@ function InventoryPanel() {
                 const payloadItem = gameUiStore.getState().itemForKey(payload?.key);
                 if (!payloadItem || !canEquipItemInSlot(payloadItem, slot.id)) return;
                 event.preventDefault();
-                gameUiStore.getState().equipItem(payload.key);
+                gameUiStore.getState().equipItem(payload.key, slot.id);
                 clearDragPayload();
               },
             };
             return item ? (
               <button
-                className={`equipment-slot is-filled equipment-${slot.area} ${canDrop ? 'is-drop-target' : ''}`}
+                className={`equipment-slot is-filled equipment-${slot.area} ${slotVisual.className} ${
+                  canDrop ? 'is-drop-target' : ''
+                }`}
                 type="button"
                 data-item={item.key}
+                draggable
+                style={slotVisual.style}
                 title={`${item.name}, ${itemLevelText(item)}`}
                 aria-label={`${item.name}, ${itemLevelText(item)}`}
                 key={slot.id}
-                onClick={() => gameUiStore.getState().setSelectedItemKey(item.key)}
+                onClick={(event) => {
+                  if (event.shiftKey) gameUiStore.getState().unequipItem(slot.id);
+                  else gameUiStore.getState().setSelectedItemKey(item.key);
+                }}
+                onDragStart={(event) => {
+                  gameUiStore.getState().setSelectedItemKey(null);
+                  writeDragPayload(event, { source: 'equipment', key: item.key, slotId: slot.id });
+                }}
+                onDragEnd={clearDragPayload}
                 {...commonProps}
               >
-                <span className="equipment-label">{slot.label}</span>
                 <span className="item-level-badge">{itemLevelShort(item)}</span>
                 <ItemIcon itemKey={item.key} className="equipment-weapon-icon" />
-                <strong>{item.name}</strong>
               </button>
             ) : (
               <div
@@ -388,17 +400,22 @@ function InventoryPanel() {
             key ? (
               (() => {
                 const item = state.itemForKey(key);
+                const slotVisual = itemSlotVisual(item);
                 return (
               <button
                 type="button"
-                className={`bag-slot is-filled ${item.className} ${
+                className={`bag-slot is-filled ${item.className} ${slotVisual.className} ${
                   state.dragPayload?.source === 'inventory' && state.dragPayload?.index === index ? 'is-dragging' : ''
                 }`}
                 data-slot={index}
                 data-item={key}
                 draggable
                 key={`${key}-${index}`}
-                onClick={() => gameUiStore.getState().setSelectedItemKey(key)}
+                style={slotVisual.style}
+                onClick={(event) => {
+                  if (event.shiftKey && equipmentSlotForItem(item)) gameUiStore.getState().equipItem(key);
+                  else gameUiStore.getState().setSelectedItemKey(key);
+                }}
                 onDragStart={(event) => {
                   gameUiStore.getState().setSelectedItemKey(null);
                   writeDragPayload(event, { source: 'inventory', key, index });
@@ -413,7 +430,7 @@ function InventoryPanel() {
                   const payload = readDragPayload(event);
                   if (!payload?.key) return;
                   event.preventDefault();
-                  gameUiStore.getState().moveInventoryItem(payload.key, index);
+                  moveDroppedPayloadToInventory(payload, index);
                   clearDragPayload();
                 }}
                 title={`${item.name}, ${itemLevelText(item)}`}
@@ -440,7 +457,7 @@ function InventoryPanel() {
                   const payload = readDragPayload(event);
                   if (!payload?.key) return;
                   event.preventDefault();
-                  gameUiStore.getState().moveInventoryItem(payload.key, index);
+                  moveDroppedPayloadToInventory(payload, index);
                   clearDragPayload();
                 }}
               />
@@ -487,8 +504,8 @@ function InventoryPanel() {
                 id="itemPopoverAction"
                 type="button"
                 onClick={() => {
-                  if (selectedIsEquipped) gameUiStore.getState().unequipItem(selectedEquipmentSlot);
-                  else if (selectedEquipmentSlot) gameUiStore.getState().equipItem(selected.key);
+                  if (selectedIsEquipped) gameUiStore.getState().unequipItem(selectedEquippedSlot);
+                  else if (selectedEquipmentSlot) gameUiStore.getState().equipItem(selected.key, selectedEquipmentSlot);
                   else gameUiStore.getState().useItem(selected.key);
                 }}
               >
